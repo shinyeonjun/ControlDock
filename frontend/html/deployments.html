@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsHub - 배포 관리</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 사이드바 네비게이션 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>OpsHub</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="index.html" class="nav-item">
+                    <span>대시보드</span>
+                </a>
+                <a href="agents.html" class="nav-item">
+                    <span>에이전트</span>
+                </a>
+                <a href="deployments.html" class="nav-item active">
+                    <span>배포</span>
+                </a>
+                <a href="announcements.html" class="nav-item">
+                    <span>공지</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 메인 컨텐츠 -->
+        <main class="main-content">
+            <header class="page-header">
+                <h2>배포 관리</h2>
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="new-deployment-btn">
+                        새 배포 생성
+                    </button>
+                </div>
+            </header>
+
+            <!-- 배포 목록 -->
+            <div class="content-card">
+                <div class="card-header">
+                    <h3>배포 목록</h3>
+                    <div class="header-stats">
+                        <span class="stat-badge running">실행 중: <span id="running-deployments">0</span></span>
+                        <span class="stat-badge success">성공: <span id="success-deployments-count">0</span></span>
+                        <span class="stat-badge failed">실패: <span id="failed-deployments-count">0</span></span>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>작업 ID</th>
+                                <th>작업명</th>
+                                <th>유형</th>
+                                <th>대상 수</th>
+                                <th>상태</th>
+                                <th>진행률</th>
+                                <th>성공/실패</th>
+                                <th>생성 시간</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="deployments-table">
+                            <tr>
+                                <td colspan="9" class="empty-state">데이터 로딩 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 배포 생성 다이얼로그 -->
+            <div id="deployment-modal" class="modal">
+                <div class="modal-content large">
+                    <div class="modal-header">
+                        <h3>새 배포 생성</h3>
+                        <button class="modal-close" id="close-deployment-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="deployment-form">
+                            <div class="form-section">
+                                <h4>1. 작업 정보</h4>
+                                <div class="form-group">
+                                    <label>작업명</label>
+                                    <input type="text" id="deployment-name" placeholder="예: Notepad++ 설치" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>작업 유형</label>
+                                    <select id="deployment-type" required>
+                                        <option value="powershell">PowerShell 스크립트</option>
+                                        <option value="command">명령 실행</option>
+                                        <option value="install">프로그램 설치</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>명령/스크립트</label>
+                                    <textarea id="deployment-command" rows="5" placeholder="실행할 명령 또는 PowerShell 스크립트를 입력하세요" required></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>타임아웃 (초)</label>
+                                    <input type="number" id="deployment-timeout" value="300" min="1" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>
+                                        <input type="checkbox" id="deployment-admin"> 관리자 권한으로 실행
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="form-section">
+                                <h4>2. 대상 선택</h4>
+                                <div class="form-group">
+                                    <label>대상 선택 방식</label>
+                                    <select id="target-type" required>
+                                        <option value="all">전체 에이전트</option>
+                                        <option value="online">온라인 에이전트만</option>
+                                        <option value="selected">선택한 에이전트</option>
+                                        <option value="tag">태그로 선택</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" id="target-agents-group" style="display: none;">
+                                    <label>에이전트 선택</label>
+                                    <div id="agent-selector" class="agent-selector">
+                                        <!-- 에이전트 체크박스 리스트 -->
+                                    </div>
+                                </div>
+                                <div class="form-group" id="target-tag-group" style="display: none;">
+                                    <label>태그</label>
+                                    <input type="text" id="target-tag" placeholder="예: 개발부, Windows11">
+                                </div>
+                            </div>
+
+                            <div class="form-section">
+                                <h4>3. 실행 일정</h4>
+                                <div class="form-group">
+                                    <label>실행 방식</label>
+                                    <select id="schedule-type" required>
+                                        <option value="now">즉시 실행</option>
+                                        <option value="scheduled">예약 실행</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" id="schedule-time-group" style="display: none;">
+                                    <label>실행 시간</label>
+                                    <input type="datetime-local" id="schedule-time">
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" id="cancel-deployment">취소</button>
+                        <button class="btn btn-primary" id="submit-deployment">배포 생성</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 배포 상세 다이얼로그 -->
+            <div id="deployment-detail-modal" class="modal">
+                <div class="modal-content large">
+                    <div class="modal-header">
+                        <h3>배포 상세</h3>
+                        <button class="modal-close" id="close-detail-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="detail-section">
+                            <h4>작업 정보</h4>
+                            <div class="detail-grid">
+                                <div class="detail-item">
+                                    <span class="detail-label">작업 ID:</span>
+                                    <span class="detail-value" id="detail-task-id">-</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">상태:</span>
+                                    <span class="detail-value" id="detail-status">-</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">진행률:</span>
+                                    <span class="detail-value" id="detail-progress">-</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">성공/실패:</span>
+                                    <span class="detail-value" id="detail-success-fail">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="detail-section">
+                            <h4>실행 결과</h4>
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>호스트명</th>
+                                            <th>상태</th>
+                                            <th>종료코드</th>
+                                            <th>소요시간</th>
+                                            <th>로그 요약</th>
+                                            <th>작업</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="deployment-results-table">
+                                        <tr>
+                                            <td colspan="6" class="empty-state">결과 로딩 중...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="detail-section" id="log-detail-section" style="display: none;">
+                            <h4>로그 상세</h4>
+                            <div class="log-viewer" id="log-viewer">
+                                <pre id="log-content"></pre>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" id="pause-deployment">일시중지</button>
+                        <button class="btn btn-primary" id="resume-deployment">재개</button>
+                        <button class="btn btn-secondary" id="close-detail">닫기</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/js/config.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/deployments.js"></script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsHub - 공지</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 사이드바 네비게이션 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>OpsHub</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="index.html" class="nav-item">
+                    <span>대시보드</span>
+                </a>
+                <a href="agents.html" class="nav-item">
+                    <span>에이전트</span>
+                </a>
+                <a href="deployments.html" class="nav-item">
+                    <span>배포</span>
+                </a>
+                <a href="announcements.html" class="nav-item active">
+                    <span>공지</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 메인 컨텐츠 -->
+        <main class="main-content">
+            <header class="page-header">
+                <h2>공지 관리</h2>
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="new-announcement-btn">
+                        새 공지 발송
+                    </button>
+                </div>
+            </header>
+
+            <!-- 공지 목록 -->
+            <div class="content-card">
+                <div class="card-header">
+                    <h3>발송된 공지</h3>
+                    <div class="header-stats">
+                        <span class="stat-badge total">전체: <span id="total-announcements">0</span></span>
+                        <span class="stat-badge success">수신 성공: <span id="success-announcements">0</span></span>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>공지 ID</th>
+                                <th>제목</th>
+                                <th>전송 방식</th>
+                                <th>대상</th>
+                                <th>수신률</th>
+                                <th>발송 시간</th>
+                                <th>상태</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="announcements-table">
+                            <tr>
+                                <td colspan="8" class="empty-state">데이터 로딩 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 공지 발송 다이얼로그 -->
+            <div id="announcement-modal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>새 공지 발송</h3>
+                        <button class="modal-close" id="close-announcement-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="announcement-form">
+                            <div class="form-group">
+                                <label>공지 제목</label>
+                                <input type="text" id="announcement-title" placeholder="예: 오늘 20:00 유지보수 예정" required>
+                            </div>
+                            <div class="form-group">
+                                <label>공지 내용</label>
+                                <textarea id="announcement-content" rows="5" placeholder="공지 내용을 입력하세요" required></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>전송 방식</label>
+                                <select id="announcement-type" required>
+                                    <option value="broadcast">브로드캐스트 (전체 서브넷)</option>
+                                    <option value="multicast">멀티캐스트 (특정 그룹)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="multicast-group-group" style="display: none;">
+                                <label>멀티캐스트 그룹</label>
+                                <input type="text" id="multicast-group" placeholder="예: 개발부, 운영팀">
+                                <small>쉼표로 구분하여 여러 그룹 지정 가능</small>
+                            </div>
+                            <div class="form-group">
+                                <label>우선순위</label>
+                                <select id="announcement-priority">
+                                    <option value="normal">일반</option>
+                                    <option value="high">높음</option>
+                                    <option value="urgent">긴급</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="announcement-tray"> 트레이 알림 표시
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="announcement-log"> 로그에 기록
+                                </label>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" id="cancel-announcement">취소</button>
+                        <button class="btn btn-primary" id="submit-announcement">공지 발송</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 공지 상세 다이얼로그 -->
+            <div id="announcement-detail-modal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>공지 상세</h3>
+                        <button class="modal-close" id="close-announcement-detail-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="detail-section">
+                            <h4 id="detail-announcement-title">-</h4>
+                            <div class="announcement-content" id="detail-announcement-content">-</div>
+                        </div>
+                        <div class="detail-section">
+                            <h4>전송 통계</h4>
+                            <div class="detail-grid">
+                                <div class="detail-item">
+                                    <span class="detail-label">전송 방식:</span>
+                                    <span class="detail-value" id="detail-announcement-type">-</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">대상 수:</span>
+                                    <span class="detail-value" id="detail-announcement-targets">-</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">수신 성공:</span>
+                                    <span class="detail-value success" id="detail-announcement-success">-</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">수신 실패:</span>
+                                    <span class="detail-value failed" id="detail-announcement-failed">-</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">유실률:</span>
+                                    <span class="detail-value" id="detail-announcement-loss">-</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">발송 시간:</span>
+                                    <span class="detail-value" id="detail-announcement-time">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" id="close-announcement-detail">닫기</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/js/config.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/announcements.js"></script>
+</body>
+</html>

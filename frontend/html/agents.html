@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsHub - 에이전트</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 사이드바 네비게이션 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>OpsHub</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="index.html" class="nav-item">
+                    <span>대시보드</span>
+                </a>
+                <a href="agents.html" class="nav-item active">
+                    <span>에이전트</span>
+                </a>
+                <a href="deployments.html" class="nav-item">
+                    <span>배포</span>
+                </a>
+                <a href="announcements.html" class="nav-item">
+                    <span>공지</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 메인 컨텐츠 -->
+        <main class="main-content">
+            <header class="page-header">
+                <h2>에이전트 관리</h2>
+            </header>
+
+            <!-- 등록 요청 목록 -->
+            <div class="content-card" id="registration-requests-card" style="display: none;">
+                <div class="card-header">
+                    <h3>등록 요청 대기</h3>
+                    <div class="header-stats">
+                        <span class="stat-badge pending">대기 중: <span id="pending-requests-count">0</span></span>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>호스트명</th>
+                                <th>OS</th>
+                                <th>에이전트 버전</th>
+                                <th>요청 시간</th>
+                                <th>상태</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="registration-requests-table">
+                            <tr>
+                                <td colspan="6" class="empty-state">등록 요청이 없습니다</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 안내 메시지 -->
+            <div class="info-card">
+                <h4>PC 등록 방법</h4>
+                <p>PC 등록은 각 Windows PC에 설치된 에이전트 프로그램이 자동으로 수행합니다.</p>
+                <ol>
+                    <li>에이전트 프로그램 실행 시 등록 승인 창이 표시됩니다</li>
+                    <li>"예"를 선택하면 등록 요청이 서버로 전송됩니다</li>
+                    <li>대시보드에서 등록 요청을 확인하고 승인하세요</li>
+                    <li>승인된 PC는 아래 목록에 표시됩니다</li>
+                </ol>
+            </div>
+
+            <!-- 필터 및 검색 -->
+            <div class="toolbar">
+                <div class="search-box">
+                    <input type="text" id="agent-search" placeholder="호스트명 검색...">
+                </div>
+                <div class="filter-group">
+                    <select id="status-filter">
+                        <option value="all">전체 상태</option>
+                        <option value="online">온라인</option>
+                        <option value="offline">오프라인</option>
+                    </select>
+                    <select id="os-filter">
+                        <option value="all">전체 OS</option>
+                        <option value="Windows 10">Windows 10</option>
+                        <option value="Windows 11">Windows 11</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 에이전트 목록 -->
+            <div class="content-card">
+                <div class="card-header">
+                    <h3>등록된 에이전트</h3>
+                    <div class="header-stats">
+                        <span class="stat-badge online">온라인: <span id="filtered-online">0</span></span>
+                        <span class="stat-badge offline">오프라인: <span id="filtered-offline">0</span></span>
+                        <span class="stat-badge total">전체: <span id="filtered-total">0</span></span>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>상태</th>
+                                <th>호스트명</th>
+                                <th>호스트 ID</th>
+                                <th>OS</th>
+                                <th>에이전트 버전</th>
+                                <th>마지막 체크인</th>
+                                <th>등록 시간</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agents-table">
+                            <tr>
+                                <td colspan="8" class="empty-state">데이터 로딩 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script src="/js/config.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/agents.js"></script>
+</body>
+</html>
