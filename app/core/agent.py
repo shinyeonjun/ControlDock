@@ -91,7 +91,32 @@ class Agent:
         while self.running:
             try:
                 # 하트비트 전송 및 상태 반영
-                self.status = 'online' if self._send_heartbeat(agent_id, agent_token) else 'offline'
+                heartbeat_result = self._send_heartbeat(agent_id, agent_token)
+                # 410 Gone 응답이면 재등록 필요
+                if isinstance(heartbeat_result, dict) and heartbeat_result.get('_needs_reregistration'):
+                    print("서버에서 에이전트를 찾을 수 없습니다. 재등록을 시작합니다...")
+                    # agent_id와 agent_token 초기화
+                    self.config.agent_id = None
+                    self.config.set('agent_id', None)
+                    if hasattr(self.config, 'agent_token_file'):
+                        # agent_token.txt 파일도 삭제
+                        import os
+                        token_file = self.config.agent_token_file
+                        if token_file and os.path.exists(token_file):
+                            try:
+                                os.remove(token_file)
+                            except:
+                                pass
+                    # registration_request_id도 초기화
+                    self.registration.request_id = None
+                    self.config.set('registration_request_id', None)
+                    # 재등록 루프로 이동
+                    self._run()
+                    return
+                
+                heartbeat_success = bool(heartbeat_result)
+                
+                self.status = 'online' if heartbeat_success else 'offline'
                 self._update_tray_status()
                 # 작업 폴링
                 self._poll_tasks(agent_id, agent_token)
@@ -209,14 +234,21 @@ class Agent:
                 # 오류 발생 시 더 긴 간격으로 재시도
                 time.sleep(interval * 2)
     
-    def _send_heartbeat(self, agent_id: str, agent_token: str) -> bool:
-        """하트비트 전송"""
-        success = self.client.send_heartbeat(agent_id, agent_token)
-        if success:
+    def _send_heartbeat(self, agent_id: str, agent_token: str):
+        """하트비트 전송
+        Returns:
+            True: 성공
+            False: 실패
+            dict with '_needs_reregistration': True: 재등록 필요
+        """
+        result = self.client.send_heartbeat(agent_id, agent_token)
+        # 410 Gone 응답이면 재등록 필요
+        if isinstance(result, dict) and result.get('_needs_reregistration'):
+            print(f"[{datetime.now()}] 하트비트 전송 실패 - 서버에서 에이전트를 찾을 수 없음. 재등록이 필요합니다.")
+            return result  # 재등록 필요 플래그 반환
+        if result:
             print(f"[{datetime.now()}] 하트비트 전송 성공")
-        else:
-            print(f"[{datetime.now()}] 하트비트 전송 실패")
-        return success
+        return result
     
     def _update_tray_status(self):
         """트레이 아이콘 상태 업데이트"""

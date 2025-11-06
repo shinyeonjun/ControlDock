@@ -4,7 +4,7 @@ FastAPI + Uvicorn 기반
 """
 import asyncio
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
@@ -258,6 +258,79 @@ async def get_system_status() -> Dict[str, Any]:
         "database": "connected"  # 임시
     }
 
+# 에이전트 API
+@app.post("/api/agents/{agent_id}/heartbeat")
+async def agent_heartbeat(agent_id: str) -> Dict[str, Any]:
+    """에이전트 하트비트"""
+    if not tcp_server:
+        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
+    
+    # 등록 요청에서 agent_id로 찾기
+    requests = tcp_server.get_registration_requests()
+    agent_request = next((r for r in requests if r.get('agent_id') == agent_id), None)
+    
+    if not agent_request:
+        # agent_id를 찾을 수 없으면 재등록 필요 (410 Gone - 리소스가 영구적으로 제거됨)
+        raise HTTPException(
+            status_code=410,
+            detail="에이전트를 찾을 수 없습니다. 서버가 재시작되어 등록 정보가 초기화되었습니다. 재등록이 필요합니다."
+        )
+    
+    # 하트비트 시간 업데이트 (메모리 기반, 향후 DB로 변경)
+    from datetime import datetime
+    agent_request['last_heartbeat'] = datetime.utcnow().isoformat()
+    
+    return {
+        "success": True,
+        "message": "하트비트 수신됨"
+    }
+
+@app.post("/api/agents/{agent_id}/tasks/poll")
+async def agent_poll_tasks(agent_id: str, payload: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+    """작업 폴링"""
+    if not tcp_server:
+        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
+    
+    # 등록 요청에서 agent_id로 찾기
+    requests = tcp_server.get_registration_requests()
+    agent_request = next((r for r in requests if r.get('agent_id') == agent_id), None)
+    
+    if not agent_request:
+        # agent_id를 찾을 수 없으면 재등록 필요 (410 Gone - 리소스가 영구적으로 제거됨)
+        raise HTTPException(
+            status_code=410,
+            detail="에이전트를 찾을 수 없습니다. 서버가 재시작되어 등록 정보가 초기화되었습니다. 재등록이 필요합니다."
+        )
+    
+    # 현재는 작업이 없음을 반환 (향후 작업 큐 구현)
+    return {
+        "no_task": True,
+        "message": "현재 작업이 없습니다"
+    }
+
+@app.post("/api/agents/{agent_id}/tasks/results")
+async def agent_submit_result(agent_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """작업 결과 제출"""
+    if not tcp_server:
+        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
+    
+    # 등록 요청에서 agent_id로 찾기
+    requests = tcp_server.get_registration_requests()
+    agent_request = next((r for r in requests if r.get('agent_id') == agent_id), None)
+    
+    if not agent_request:
+        raise HTTPException(status_code=404, detail="에이전트를 찾을 수 없습니다")
+    
+    # 결과 저장 (메모리 기반, 향후 DB로 변경)
+    if 'results' not in agent_request:
+        agent_request['results'] = []
+    agent_request['results'].append(result)
+    
+    return {
+        "success": True,
+        "message": "결과 제출 완료"
+    }
+
 def main():
     """메인 함수"""
     import os
@@ -281,10 +354,11 @@ def main():
                 root_config = json.load(f)
                 if 'server' in root_config:
                     server = root_config['server']
-                    host = server.get('host', '0.0.0.0')
-                    port = server.get('http_port', 8000)
-                    # TCP 서버는 항상 0.0.0.0으로 바인딩
+                    # HTTP 서버도 항상 0.0.0.0으로 바인딩 (WSL에서 외부 접근 가능하도록)
                     # config.json의 host는 클라이언트 접속용 IP이므로 서버 바인딩에는 사용하지 않음
+                    host = '0.0.0.0'
+                    port = server.get('http_port', 8000)
+                    # TCP 서버도 항상 0.0.0.0으로 바인딩
                     tcp_host = '0.0.0.0'
                     tcp_port = server.get('tcp_port', 5500)
         except Exception as e:

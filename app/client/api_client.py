@@ -26,6 +26,11 @@ class APIClient:
             return response.json()
         except requests.exceptions.HTTPError as e:
             status = getattr(e.response, 'status_code', 'unknown')
+            # 410 Gone은 에이전트가 서버에서 제거되었음을 의미 (재등록 필요)
+            if status == 410:
+                print(f"에이전트가 서버에서 제거되었습니다. 재등록이 필요합니다. [{method} {endpoint}]")
+                # 특별한 플래그를 반환하여 재등록을 유도
+                return {'_needs_reregistration': True, 'status': 410}
             print(f"API 요청 실패 [{method} {endpoint}] HTTP {status}: {e}")
             return None
         except requests.exceptions.RequestException as e:
@@ -77,10 +82,18 @@ class APIClient:
             }
         return None
     
-    def send_heartbeat(self, agent_id: str, agent_token: str) -> bool:
-        """하트비트 전송"""
+    def send_heartbeat(self, agent_id: str, agent_token: str):
+        """하트비트 전송
+        Returns:
+            True: 성공
+            False: 실패
+            dict with '_needs_reregistration': True: 재등록 필요 (410 Gone)
+        """
         self._set_auth(agent_token)
         result = self._request('POST', f'/agents/{agent_id}/heartbeat')
+        # 410 Gone이면 재등록 필요 플래그 반환
+        if isinstance(result, dict) and result.get('_needs_reregistration'):
+            return result  # 재등록 필요 플래그 반환
         return result is not None
     
     def poll_tasks(self, agent_id: str, agent_token: str, want_n: int = 1) -> Optional[Dict[str, Any]]:
