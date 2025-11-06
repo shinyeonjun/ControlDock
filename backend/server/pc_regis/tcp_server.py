@@ -158,7 +158,7 @@ class TCPRegistrationServer:
         print(f"[TCP] 등록 요청 승인: request_id={request_id}")
         return True
     
-    def complete_registration(self, request_id: str, agent_id: str) -> bool:
+    def complete_registration(self, request_id: str, agent_id: str, agent_token: str = None) -> bool:
         """등록 완료 처리"""
         if request_id not in self.registration_requests:
             return False
@@ -167,9 +167,15 @@ class TCPRegistrationServer:
         if request['status'] != 'approved':
             return False
         
+        # agent_token이 없으면 생성
+        if not agent_token:
+            import secrets
+            agent_token = secrets.token_urlsafe(32)
+        
         request['status'] = 'completed'
         request['completed_at'] = datetime.utcnow().isoformat()
         request['agent_id'] = agent_id
+        request['agent_token'] = agent_token
         
         print(f"[TCP] 등록 완료: request_id={request_id}, agent_id={agent_id}")
         return True

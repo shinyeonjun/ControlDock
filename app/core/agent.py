@@ -79,6 +79,11 @@ class Agent:
             self._update_tray_status()
             return
         
+        # 메인 루프 실행
+        self._run_main_loop(agent_id, agent_token)
+    
+    def _run_main_loop(self, agent_id: str, agent_token: str):
+        """등록된 에이전트의 메인 실행 루프 (하트비트 및 작업 폴링)"""
         print(f"에이전트 실행 중... (ID: {agent_id})")
         self.status = 'online'
         self._update_tray_status()
@@ -138,9 +143,25 @@ class Agent:
                         # 서비스 설치 확인은 메인 스레드에서 실행되도록 콜백 사용
                         # (complete_registration 내부에서 콜백이 호출됨)
                         
-                        # 등록 완료 후 메인 루프로 전환
-                        self._run()
-                        return
+                        # 등록 완료 후 request_id 클리어하여 재등록 방지
+                        self.registration.request_id = None
+                        if hasattr(self.config, 'set'):
+                            self.config.set('registration_request_id', None)
+                        
+                        # 등록 완료 후 메인 루프로 직접 진입 (재귀 호출 대신)
+                        # agent_id와 agent_token이 제대로 저장되었는지 확인
+                        agent_id = self.config.agent_id
+                        agent_token = self.config.get_agent_token()
+                        
+                        if agent_id and agent_token:
+                            # 메인 루프 실행
+                            self._run_main_loop(agent_id, agent_token)
+                            return
+                        else:
+                            print("에이전트 ID 또는 토큰이 저장되지 않았습니다. 재시작이 필요합니다.")
+                            self.status = 'offline'
+                            self._update_tray_status()
+                            break
                     else:
                         print("등록 완료 실패")
                         self.status = 'offline'
@@ -154,9 +175,35 @@ class Agent:
                     break
                 
                 elif status == 'completed':
-                    print("이미 등록이 완료되었습니다.")
-                    self._run()
-                    return
+                    print("이미 등록이 완료되었습니다. agent_id와 agent_token을 받아옵니다...")
+                    # completed 상태이지만 agent_id와 agent_token이 없을 수 있으므로
+                    # complete_registration()을 호출하여 받아옴
+                    result = self.registration.complete_registration()
+                    if result:
+                        print("등록 정보를 받아왔습니다!")
+                        # request_id 클리어
+                        self.registration.request_id = None
+                        if hasattr(self.config, 'set'):
+                            self.config.set('registration_request_id', None)
+                        
+                        # 등록 완료 후 메인 루프로 직접 진입
+                        agent_id = self.config.agent_id
+                        agent_token = self.config.get_agent_token()
+                        
+                        if agent_id and agent_token:
+                            # 메인 루프 실행
+                            self._run_main_loop(agent_id, agent_token)
+                            return
+                        else:
+                            print("에이전트 ID 또는 토큰이 저장되지 않았습니다. 재시작이 필요합니다.")
+                            self.status = 'offline'
+                            self._update_tray_status()
+                            break
+                    else:
+                        print("등록 정보를 받아오는데 실패했습니다.")
+                        self.status = 'offline'
+                        self._update_tray_status()
+                        break
                 
                 elif status == 'pending':
                     # 대기 중이면 간격을 두고 다시 확인

@@ -80,20 +80,21 @@ class RegistrationManager:
             
             print(f"등록 완료: agent_id={agent_id}")
             
-            # 재부팅 후 자동 실행을 위한 시작 프로그램 등록 (사용자 선택)
-            # 콜백이 있으면 메인 스레드에서 실행, 없으면 직접 실행
-            if self.startup_callback:
-                print(f"시작 프로그램 등록 확인을 메인 스레드로 전달합니다... (콜백: {self.startup_callback})")
-                try:
-                    self.startup_callback()
-                    print("시작 프로그램 등록 콜백 호출 완료")
-                except Exception as e:
-                    print(f"시작 프로그램 등록 콜백 호출 실패: {e}")
-                    import traceback
-                    traceback.print_exc()
+            # 재부팅 후 자동 실행을 위한 시작 프로그램 등록
+            # 사용자가 등록 요청 시 선택한 경우 자동으로 등록
+            should_register = self.config.get('should_register_startup', False)
+            
+            if should_register:
+                print("사용자가 등록 요청 시 시작 프로그램 등록을 선택했습니다. 등록을 진행합니다...")
+                # 시작 프로그램 등록 실행
+                if self._register_startup():
+                    print("시작 프로그램 등록 완료. 재부팅 후 자동으로 실행됩니다.")
+                else:
+                    print("시작 프로그램 등록 실패.")
+                # 설정에서 제거 (한 번만 등록)
+                self.config.set('should_register_startup', False)
             else:
-                print("시작 프로그램 등록 콜백이 없습니다. 직접 실행 시도")
-                self._ask_and_register_startup()
+                print("시작 프로그램 등록을 선택하지 않았으므로 등록하지 않습니다.")
             
             return response
         
@@ -103,7 +104,7 @@ class RegistrationManager:
         """사용자에게 시작 프로그램 등록 여부를 물어보고 등록"""
         try:
             from PyQt6.QtWidgets import QApplication, QMessageBox
-            from PyQt6.QtCore import QTimer
+            from PyQt6.QtCore import QTimer, QThread
             import sys
             import threading
             
@@ -131,7 +132,7 @@ class RegistrationManager:
                     msg.setDefaultButton(QMessageBox.StandardButton.Yes)
                     
                     # 다이얼로그를 강제로 최상위로 표시
-                    msg.setWindowFlags(msg.windowFlags() | msg.windowFlags().WindowStaysOnTopHint)
+                    msg.setWindowFlags(msg.windowFlags() | 0x00000008)  # WindowStaysOnTopHint
                     msg.activateWindow()  # 창 활성화
                     msg.raise_()  # 창을 맨 앞으로
                     
@@ -139,7 +140,7 @@ class RegistrationManager:
                     result = msg.exec()
                     print(f"다이얼로그 결과: {result}")
                     
-                    if result == QMessageBox.StandardButton.Yes:
+                    if result == QMessageBox.StandardButton.Yes.value:
                         print("사용자가 시작 프로그램 등록을 승인했습니다.")
                         if self._register_startup():
                             print("시작 프로그램 등록 완료. 재부팅 후 자동으로 실행됩니다.")
@@ -189,8 +190,17 @@ class RegistrationManager:
             else:
                 # 백그라운드 스레드에서 실행 중이면 QTimer로 메인 스레드로 전달
                 print("백그라운드 스레드에서 실행 중. QTimer로 메인 스레드로 전달")
-                QTimer.singleShot(100, show_startup_dialog)
-                print("QTimer 설정 완료")
+                # QApplication의 메인 스레드로 전달
+                if app:
+                    # QTimer를 사용하여 메인 이벤트 루프에서 실행
+                    timer = QTimer()
+                    timer.setSingleShot(True)
+                    timer.timeout.connect(show_startup_dialog)
+                    timer.start(100)
+                    print("QTimer 설정 완료 (100ms 후 실행)")
+                else:
+                    print("QApplication이 없어서 직접 실행 시도")
+                    show_startup_dialog()
                 
         except Exception as e:
             print(f"시작 프로그램 등록 확인 중 오류: {e}")
@@ -198,6 +208,18 @@ class RegistrationManager:
             traceback.print_exc()
     
     def _register_startup(self):
+        """시작 프로그램에 등록 (재부팅 후 자동 실행) - 플랫폼별 처리"""
+        import platform
+        
+        if platform.system() == 'Windows':
+            return self._register_startup_windows()
+        elif platform.system() == 'Darwin':  # macOS
+            return self._register_startup_mac()
+        else:
+            print(f"{platform.system()} 플랫폼은 아직 지원하지 않습니다.")
+            return False
+    
+    def _register_startup_windows(self):
         """Windows 시작 프로그램에 등록 (재부팅 후 자동 실행)"""
         try:
             import os
@@ -250,12 +272,28 @@ class RegistrationManager:
                     # Python 스크립트인 경우
                     # 배치 파일을 생성하여 실행
                     bat_path = os.path.join(startup_folder, "OpsHubAgent.bat")
+                    
+                    # 가상 환경 확인 (venv가 있는 경우)
+                    venv_python = None
+                    script_dir = os.path.dirname(main_path)
+                    # app 폴더의 상위 폴더에 venv가 있을 수 있음
+                    parent_dir = os.path.dirname(script_dir)
+                    venv_python_exe = os.path.join(parent_dir, 'venv', 'Scripts', 'python.exe')
+                    if os.path.exists(venv_python_exe):
+                        venv_python = venv_python_exe
+                        print(f"가상 환경 Python 발견: {venv_python}")
+                    
                     with open(bat_path, 'w', encoding='utf-8') as f:
-                        f.write(f'@echo off\n')
-                        f.write(f'cd /d "{os.path.dirname(main_path)}"\n')
-                        f.write(f'"{python_exe}" "{main_path}"\n')
+                        f.write('@echo off\n')
+                        f.write(f'cd /d "{script_dir}"\n')
+                        # 가상 환경이 있으면 사용, 없으면 시스템 Python 사용
+                        if venv_python:
+                            f.write(f'"{venv_python}" "{main_path}"\n')
+                        else:
+                            f.write(f'"{python_exe}" "{main_path}"\n')
+                    
                     shortcut.Targetpath = bat_path
-                    shortcut.WorkingDirectory = os.path.dirname(main_path)
+                    shortcut.WorkingDirectory = script_dir
                 
                 shortcut.save()
                 print(f"시작 프로그램에 등록되었습니다: {shortcut_path}")
@@ -273,6 +311,109 @@ class RegistrationManager:
                 
         except Exception as e:
             print(f"시작 프로그램 등록 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _register_startup_mac(self):
+        """Mac 시작 프로그램에 등록 (재부팅 후 자동 실행) - LaunchAgent 사용"""
+        try:
+            import os
+            import sys
+            import json
+            from pathlib import Path
+            
+            # LaunchAgent plist 파일 경로
+            home = os.path.expanduser("~")
+            launch_agents_dir = os.path.join(home, "Library", "LaunchAgents")
+            plist_name = "com.opshub.agent.plist"
+            plist_path = os.path.join(launch_agents_dir, plist_name)
+            
+            # 이미 등록되어 있는지 확인
+            if os.path.exists(plist_path):
+                print(f"이미 시작 프로그램에 등록되어 있습니다: {plist_path}")
+                return True
+            
+            # 실행 파일 경로 찾기
+            program_arguments = []
+            
+            if getattr(sys, 'frozen', False):
+                # .app 번들인 경우
+                # PyInstaller로 빌드된 경우 sys.executable이 .app/Contents/MacOS/OpsHubAgent 경로
+                executable_path = sys.executable
+                program_arguments = [executable_path]
+            else:
+                # 개발 모드인 경우
+                python_exe = sys.executable
+                script_path = Path(__file__).resolve()
+                main_path = script_path.parent.parent / 'main.py'
+                if not main_path.exists():
+                    print(f"main.py를 찾을 수 없습니다: {main_path}")
+                    return False
+                
+                # 가상 환경 확인
+                venv_python = None
+                script_dir = os.path.dirname(main_path)
+                parent_dir = os.path.dirname(script_dir)
+                venv_python_exe = os.path.join(parent_dir, 'venv', 'bin', 'python3')
+                if os.path.exists(venv_python_exe):
+                    venv_python = venv_python_exe
+                    print(f"가상 환경 Python 발견: {venv_python}")
+                
+                python_path = venv_python if venv_python else python_exe
+                program_arguments = [python_path, str(main_path)]
+            
+            # LaunchAgent 디렉토리 생성
+            os.makedirs(launch_agents_dir, exist_ok=True)
+            
+            # 로그 디렉토리 생성
+            log_dir = os.path.join(home, 'Library', 'Logs', 'OpsHubAgent')
+            os.makedirs(log_dir, exist_ok=True)
+            
+            # plist 파일 생성
+            plist_content = {
+                'Label': 'com.opshub.agent',
+                'ProgramArguments': program_arguments,
+                'RunAtLoad': True,
+                'KeepAlive': False,
+                'StandardOutPath': os.path.join(log_dir, 'stdout.log'),
+                'StandardErrorPath': os.path.join(log_dir, 'stderr.log'),
+            }
+            
+            # plist 파일을 XML 형식으로 작성
+            import plistlib
+            with open(plist_path, 'wb') as f:
+                plistlib.dump(plist_content, f)
+            
+            print(f"LaunchAgent plist 파일 생성: {plist_path}")
+            
+            # LaunchAgent 로드
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['launchctl', 'load', plist_path],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                
+                if result.returncode == 0:
+                    print("LaunchAgent가 성공적으로 로드되었습니다.")
+                    print("재부팅 후 자동으로 실행됩니다.")
+                    return True
+                else:
+                    print(f"LaunchAgent 로드 실패: {result.stderr}")
+                    print("수동으로 로드하려면:")
+                    print(f"  launchctl load {plist_path}")
+                    return False
+            except Exception as e:
+                print(f"LaunchAgent 로드 중 오류: {e}")
+                print("수동으로 로드하려면:")
+                print(f"  launchctl load {plist_path}")
+                return False
+                
+        except Exception as e:
+            print(f"Mac 시작 프로그램 등록 중 오류: {e}")
             import traceback
             traceback.print_exc()
             return False

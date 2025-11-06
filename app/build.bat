@@ -18,34 +18,51 @@ echo 빌드 디렉토리 정리 중...
 if exist dist rmdir /s /q dist
 if exist build rmdir /s /q build
 if exist __pycache__ rmdir /s /q __pycache__
-if exist *.spec del /q *.spec
+REM spec 파일은 삭제하지 않음 (config.json 포함 설정이 있음)
 
-REM PyInstaller로 EXE 빌드
+REM config.json 파일 확인
+if not exist config.json (
+    echo.
+    echo 경고: config.json 파일이 없습니다!
+    echo app/config.json 파일이 필요합니다.
+    pause
+    exit /b 1
+)
+
+REM PyInstaller로 EXE 빌드 (spec 파일 사용)
 echo.
 echo EXE 빌드 중...
-pyinstaller --onefile ^
-    --name OpsHubAgent ^
-    --console ^
-    --hidden-import=requests ^
-    --hidden-import=win32timezone ^
-    --hidden-import=win32api ^
-    --hidden-import=win32con ^
-    --hidden-import=pystray ^
-    --hidden-import=PIL ^
-    --hidden-import=PIL.Image ^
-    --hidden-import=PIL.ImageDraw ^
-    --hidden-import=PyQt6 ^
-    --hidden-import=PyQt6.QtCore ^
-    --hidden-import=PyQt6.QtGui ^
-    --hidden-import=PyQt6.QtWidgets ^
-    --hidden-import=win32service ^
-    --hidden-import=win32serviceutil ^
-    --hidden-import=servicemanager ^
-    --hidden-import=psutil ^
-    --collect-all PyQt6 ^
-    --collect-all pystray ^
-    --collect-all requests ^
-    main.py
+if exist OpsHubAgent.spec (
+    echo spec 파일을 사용하여 빌드합니다...
+    pyinstaller OpsHubAgent.spec
+) else (
+    echo spec 파일이 없어서 새로 생성합니다...
+    pyinstaller --onefile ^
+        --name OpsHubAgent ^
+        --console ^
+        --add-data "config.json;." ^
+        --hidden-import=requests ^
+        --hidden-import=win32timezone ^
+        --hidden-import=win32api ^
+        --hidden-import=win32con ^
+        --hidden-import=pystray ^
+        --hidden-import=PIL ^
+        --hidden-import=PIL.Image ^
+        --hidden-import=PIL.ImageDraw ^
+        --hidden-import=PyQt6 ^
+        --hidden-import=PyQt6.QtCore ^
+        --hidden-import=PyQt6.QtGui ^
+        --hidden-import=PyQt6.QtWidgets ^
+        --hidden-import=win32service ^
+        --hidden-import=win32serviceutil ^
+        --hidden-import=servicemanager ^
+        --hidden-import=win32com.client ^
+        --hidden-import=psutil ^
+        --collect-all PyQt6 ^
+        --collect-all pystray ^
+        --collect-all requests ^
+        main.py
+)
 
 if %ERRORLEVEL% EQU 0 (
     echo.

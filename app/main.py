@@ -9,18 +9,30 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config.config import Config
 from core.agent import Agent
-from service.windows_service import OpsHubAgentService
-import win32serviceutil
+import platform
 
 def run_as_service():
-    """서비스로 실행"""
-    if len(sys.argv) == 1:
-        import servicemanager
-        servicemanager.Initialize()
-        servicemanager.PrepareToHostSingle(OpsHubAgentService)
-        servicemanager.StartServiceCtrlDispatcher()
-    else:
-        win32serviceutil.HandleCommandLine(OpsHubAgentService)
+    """서비스로 실행 (Windows 전용)"""
+    if platform.system() != 'Windows':
+        print("서비스 모드는 Windows에서만 지원됩니다.")
+        print("Mac/Linux에서는 LaunchAgent/LaunchDaemon을 사용하세요.")
+        sys.exit(1)
+    
+    try:
+        from service.windows_service import OpsHubAgentService
+        import win32serviceutil
+        
+        if len(sys.argv) == 1:
+            import servicemanager
+            servicemanager.Initialize()
+            servicemanager.PrepareToHostSingle(OpsHubAgentService)
+            servicemanager.StartServiceCtrlDispatcher()
+        else:
+            win32serviceutil.HandleCommandLine(OpsHubAgentService)
+    except ImportError:
+        print("Windows 서비스 모듈을 사용할 수 없습니다.")
+        print("pywin32 패키지가 설치되어 있는지 확인하세요.")
+        sys.exit(1)
 
 def run_as_console():
     """콘솔 모드로 실행 (디버깅용)"""
@@ -29,7 +41,6 @@ def run_as_console():
     
     try:
         from gui.tray_icon import TrayIcon
-        from gui.registration_dialog import RegistrationDialog
         from client.tcp_client import TCPClient
         from utils.system_info import SystemInfo
         
@@ -86,68 +97,174 @@ def run_as_console():
                 """등록 취소"""
                 print("등록이 취소되었습니다.")
             
-            # 등록 승인 다이얼로그 표시 (PyQt)
-            from PyQt6.QtWidgets import QApplication
-            import sys
+            # 등록 승인 다이얼로그 표시 (시작 프로그램 등록 옵션 포함)
+            from gui.registration_dialog import show_registration_dialog
             
-            # QApplication이 없으면 생성
-            app = QApplication.instance()
-            if app is None:
-                app = QApplication(sys.argv)
-            
-            dialog = RegistrationDialog(on_approve, on_cancel)
-            approved = dialog.exec()
+            print("등록 승인 다이얼로그 표시 중...")
+            approved, register_startup = show_registration_dialog(on_approve, on_cancel)
             
             if not approved:
                 print("등록이 취소되었습니다. 프로그램을 종료합니다.")
                 sys.exit(0)
+            
+            # 시작 프로그램 등록 여부를 config에 저장
+            if register_startup:
+                print("사용자가 시작 프로그램 등록을 선택했습니다.")
+                config.set('should_register_startup', True)
+            else:
+                print("사용자가 시작 프로그램 등록을 선택하지 않았습니다.")
+                config.set('should_register_startup', False)
         
         # 트레이 아이콘 시작
         tray_icon = TrayIcon()
         
         # 시작 프로그램 등록 콜백 (메인 스레드에서 실행)
-        from PyQt6.QtCore import QObject, pyqtSignal
+        import threading
+        from PyQt6.QtCore import QTimer, QObject, pyqtSignal
         from PyQt6.QtWidgets import QApplication
         
-        # 시작 프로그램 등록을 위한 시그널 클래스
-        class StartupSignal(QObject):
-            show_dialog = pyqtSignal()
+        # sys는 이미 파일 상단에서 import되어 있음
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication(sys.argv)
         
-        startup_signal = StartupSignal()
+        # 시작 프로그램 등록을 위한 QObject (시그널/슬롯 사용)
+        class StartupDialogTrigger(QObject):
+            show_dialog_signal = pyqtSignal()  # PyQt6에서는 pyqtSignal 사용
+            
+            def __init__(self):
+                super().__init__()
+                self.show_dialog_signal.connect(self._show_dialog)
+            
+            def _show_dialog(self):
+                """메인 스레드에서 실행되는 다이얼로그 표시"""
+                show_startup_registration_dialog()
         
-        # 시작 프로그램 등록 콜백 (메인 스레드에서 실행)
-        def check_startup_register():
-            """시작 프로그램 등록 확인 (메인 스레드에서 실행)"""
+        startup_trigger = StartupDialogTrigger()
+        
+        # 시작 프로그램 등록 다이얼로그를 표시하는 함수
+        def show_startup_registration_dialog():
+            """시작 프로그램 등록 다이얼로그 표시 (메인 스레드에서 실행)"""
             try:
-                print("시작 프로그램 등록 확인 시작 (메인 스레드)")
-                from core.registration import RegistrationManager
-                from client.api_client import APIClient
+                print("시작 프로그램 등록 다이얼로그 표시 시작")
+                from PyQt6.QtWidgets import QMessageBox
+                import os
+                from pathlib import Path
+                # sys는 이미 파일 상단에서 import되어 있음
                 
-                # RegistrationManager 인스턴스를 생성하여 시작 프로그램 등록 확인
-                api_client = APIClient(config)
-                registration = RegistrationManager(config, api_client)
-                print("RegistrationManager 인스턴스 생성 완료")
-                registration._ask_and_register_startup()
-                print("_ask_and_register_startup 호출 완료")
+                app = QApplication.instance()
+                if app is None:
+                    print("QApplication이 없어서 생성합니다...")
+                    app = QApplication(sys.argv)
+                
+                print("QMessageBox 생성 중...")
+                msg = QMessageBox()
+                msg.setWindowTitle('자동 실행 설정')
+                msg.setText('등록이 완료되었습니다.')
+                msg.setInformativeText('컴퓨터를 재시작해도 자동으로 실행되도록 시작 프로그램에 추가하시겠습니까?')
+                msg.setIcon(QMessageBox.Icon.Question)
+                msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+                
+                # 다이얼로그를 강제로 최상위로 표시
+                msg.setWindowFlags(msg.windowFlags() | 0x00000008)  # WindowStaysOnTopHint
+                msg.activateWindow()
+                msg.raise_()
+                
+                print("다이얼로그 표시 중...")
+                result = msg.exec()
+                print(f"다이얼로그 결과: {result}")
+                
+                if result == QMessageBox.StandardButton.Yes.value:
+                    print("사용자가 시작 프로그램 등록을 승인했습니다.")
+                    # 시작 프로그램 등록 실행
+                    try:
+                        startup_folder = os.path.join(
+                            os.environ.get('APPDATA', ''),
+                            r'Microsoft\Windows\Start Menu\Programs\Startup'
+                        )
+                        shortcut_name = "OpsHubAgent.lnk"
+                        shortcut_path = os.path.join(startup_folder, shortcut_name)
+                        
+                        if os.path.exists(shortcut_path):
+                            print(f"이미 시작 프로그램에 등록되어 있습니다: {shortcut_path}")
+                            success = True
+                        else:
+                            import win32com.client
+                            shell = win32com.client.Dispatch("WScript.Shell")
+                            shortcut = shell.CreateShortCut(shortcut_path)
+                            
+                            if getattr(sys, 'frozen', False):
+                                shortcut.Targetpath = sys.executable
+                                shortcut.WorkingDirectory = os.path.dirname(sys.executable)
+                            else:
+                                script_path = Path(__file__).resolve()
+                                main_path = script_path
+                                python_exe = sys.executable
+                                bat_path = os.path.join(startup_folder, "OpsHubAgent.bat")
+                                with open(bat_path, 'w', encoding='utf-8') as f:
+                                    f.write(f'@echo off\n')
+                                    f.write(f'cd /d "{os.path.dirname(main_path)}"\n')
+                                    f.write(f'"{python_exe}" "{main_path}"\n')
+                                shortcut.Targetpath = bat_path
+                                shortcut.WorkingDirectory = os.path.dirname(main_path)
+                            
+                            shortcut.save()
+                            print(f"시작 프로그램에 등록되었습니다: {shortcut_path}")
+                            success = True
+                    except Exception as e:
+                        print(f"시작 프로그램 등록 실패: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        success = False
+                    
+                    if success:
+                        msg2 = QMessageBox()
+                        msg2.setWindowTitle('등록 완료')
+                        msg2.setText('시작 프로그램에 등록되었습니다.')
+                        msg2.setInformativeText('재부팅 후 자동으로 실행됩니다.')
+                        msg2.setIcon(QMessageBox.Icon.Information)
+                        msg2.exec()
+                    else:
+                        msg2 = QMessageBox()
+                        msg2.setWindowTitle('등록 실패')
+                        msg2.setText('시작 프로그램 등록에 실패했습니다.')
+                        msg2.setInformativeText('수동으로 등록해주세요.')
+                        msg2.setIcon(QMessageBox.Icon.Warning)
+                        msg2.exec()
+                else:
+                    print("사용자가 시작 프로그램 등록을 취소했습니다.")
+                    msg2 = QMessageBox()
+                    msg2.setWindowTitle('알림')
+                    msg2.setText('시작 프로그램 등록을 건너뜁니다.')
+                    msg2.setInformativeText('나중에 수동으로 등록할 수 있습니다.')
+                    msg2.setIcon(QMessageBox.Icon.Information)
+                    msg2.exec()
+                    
             except Exception as e:
-                print(f"시작 프로그램 등록 확인 중 오류: {e}")
+                print(f"시작 프로그램 등록 다이얼로그 표시 오류: {e}")
                 import traceback
                 traceback.print_exc()
         
-        # 시그널 연결
-        print("시그널 연결 중...")
-        startup_signal.show_dialog.connect(check_startup_register)
-        print("시그널 연결 완료")
-        
-        # 간단한 콜백 함수 (시그널 발생)
+        # 콜백 함수: 시그널을 사용하여 메인 스레드에서 다이얼로그 표시
         def trigger_startup_check():
             """시작 프로그램 등록 확인 트리거"""
+            print("=" * 50)
             print("시작 프로그램 등록 확인 트리거 호출됨")
+            print(f"현재 스레드: {threading.current_thread().name}")
+            print("=" * 50)
             try:
-                startup_signal.show_dialog.emit()
-                print("시그널 emit 완료")
+                app = QApplication.instance()
+                if app:
+                    print("QApplication 인스턴스 발견, 시그널로 메인 스레드에 전달 중...")
+                    # 시그널을 emit하여 메인 스레드에서 다이얼로그 표시
+                    startup_trigger.show_dialog_signal.emit()
+                    print("시그널 emit 완료 (메인 스레드에서 다이얼로그 표시 예정)")
+                else:
+                    print("QApplication이 없어서 직접 실행 시도")
+                    show_startup_registration_dialog()
             except Exception as e:
-                print(f"시그널 emit 실패: {e}")
+                print(f"시작 프로그램 등록 트리거 오류: {e}")
                 import traceback
                 traceback.print_exc()
         
@@ -163,18 +280,12 @@ def run_as_console():
         print("트레이 아이콘을 우클릭하여 설정을 변경할 수 있습니다.")
         
         # PyQt 이벤트 루프 실행 (메인 스레드에서 GUI 이벤트 처리)
-        app = QApplication.instance()
-        if app:
-            # QApplication 이벤트 루프 실행
-            import time
-            while True:
+        # app은 이미 위에서 생성되었음
+        import time
+        while True:
+            if app:
                 app.processEvents()  # GUI 이벤트 처리 (다이얼로그 표시 가능)
-                time.sleep(0.1)  # 짧은 간격으로 대기
-        else:
-            # QApplication이 없으면 일반 대기
-            import time
-            while True:
-                time.sleep(1)
+            time.sleep(0.1)  # 짧은 간격으로 대기
             
     except KeyboardInterrupt:
         print("\n에이전트 종료 중...")

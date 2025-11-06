@@ -6,17 +6,24 @@ let registrationRequestsData = [];
 // 등록 요청 목록 로드
 async function loadRegistrationRequests() {
     try {
+        console.log('등록 요청 목록 로드 시작...');
         const requests = await apiRequest('/registration-requests');
+        console.log('등록 요청 목록 응답:', requests);
+        
         registrationRequestsData = requests || [];
+        console.log(`등록 요청 데이터: 총 ${registrationRequestsData.length}개`);
         
         // pending 상태만 필터링
         const pendingRequests = registrationRequestsData.filter(r => r.status === 'pending');
+        console.log(`대기 중인 등록 요청: ${pendingRequests.length}개`);
         
         if (pendingRequests.length > 0) {
+            console.log('등록 요청 카드 표시');
             document.getElementById('registration-requests-card').style.display = 'block';
             document.getElementById('pending-requests-count').textContent = pendingRequests.length;
             updateRegistrationRequestsTable(pendingRequests);
         } else {
+            console.log('등록 요청이 없어서 카드 숨김');
             document.getElementById('registration-requests-card').style.display = 'none';
         }
     } catch (error) {

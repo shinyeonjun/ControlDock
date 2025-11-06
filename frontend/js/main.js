@@ -1,21 +1,44 @@
 // OpsHub - 공통 JavaScript
 
-// API 기본 URL 설정
-// config.js가 먼저 로드되어 API_BASE_URL이 정의되어 있으면 사용
-// 없으면 SERVER_HOST 사용, 그것도 없으면 기본값 사용
-let API_BASE_URL;
-if (typeof API_BASE_URL_FROM_CONFIG !== 'undefined') {
-    API_BASE_URL = API_BASE_URL_FROM_CONFIG;
-} else if (typeof SERVER_HOST !== 'undefined') {
-    API_BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT || 8000}/api`;
-} else {
-    API_BASE_URL = 'http://172.24.194.92:8000/api';
+// API 기본 URL 가져오기 (config.json에서 로드)
+function getApiBaseUrl() {
+    // config.json이 로드되었으면 사용, 아니면 재시도
+    if (typeof API_BASE_URL_FROM_CONFIG !== 'undefined' && API_BASE_URL_FROM_CONFIG) {
+        return API_BASE_URL_FROM_CONFIG;
+    }
+    
+    // SERVER_HOST가 있으면 조합
+    if (typeof SERVER_HOST !== 'undefined' && SERVER_HOST) {
+        const port = typeof SERVER_PORT !== 'undefined' ? SERVER_PORT : 8000;
+        return `http://${SERVER_HOST}:${port}/api`;
+    }
+    
+    // 아직 로드되지 않았으면 기본값 (config.json이 로드될 때까지)
+    console.warn('config.json이 아직 로드되지 않았습니다. 기본값을 사용합니다.');
+    return null;
 }
 
 // API 통신 헬퍼
 async function apiRequest(endpoint, options = {}) {
+    // 설정이 로드될 때까지 대기 (최대 3초)
+    let apiBaseUrl = getApiBaseUrl();
+    let retries = 30; // 3초 동안 100ms마다 재시도
+    
+    while (!apiBaseUrl && retries > 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        apiBaseUrl = getApiBaseUrl();
+        retries--;
+    }
+    
+    if (!apiBaseUrl) {
+        throw new Error('API 서버 설정을 가져올 수 없습니다. config.json을 확인하세요.');
+    }
+    
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        const url = `${apiBaseUrl}${endpoint}`;
+        console.log(`API 요청: ${url}`);
+        
+        const response = await fetch(url, {
             headers: {
                 'Content-Type': 'application/json',
                 ...options.headers
@@ -27,7 +50,9 @@ async function apiRequest(endpoint, options = {}) {
             throw new Error(`API Error: ${response.status} ${response.statusText}`);
         }
 
-        return await response.json();
+        const data = await response.json();
+        console.log(`API 응답: ${endpoint}`, data);
+        return data;
     } catch (error) {
         console.error('API Request Error:', error);
         throw error;

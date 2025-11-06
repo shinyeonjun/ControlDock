@@ -41,7 +41,9 @@ async def lifespan(app: FastAPI):
                 root_config = json.load(f)
                 if 'server' in root_config:
                     server = root_config['server']
-                    tcp_host = server.get('host', '0.0.0.0')
+                    # TCP 서버는 항상 0.0.0.0으로 바인딩 (모든 네트워크 인터페이스에서 접근 가능)
+                    # config.json의 host는 클라이언트가 접속할 서버 IP이지, 서버 바인딩 주소가 아님
+                    # tcp_host는 0.0.0.0으로 유지
                     tcp_port = server.get('tcp_port', 5500)
         except Exception as e:
             print(f"루트 설정 파일 로드 실패: {e}, 환경변수 사용")
@@ -194,8 +196,10 @@ async def approve_registration(request_id: str) -> Dict[str, Any]:
     # 승인 후 즉시 등록 완료 처리 (테스트용)
     # 실제로는 클라이언트가 상세 정보를 보내면 완료 처리
     import uuid
+    import secrets
     agent_id = str(uuid.uuid4())
-    tcp_server.complete_registration(request_id, agent_id)
+    agent_token = secrets.token_urlsafe(32)
+    tcp_server.complete_registration(request_id, agent_id, agent_token)
     
     request = tcp_server.get_registration_request(request_id)
     return {
@@ -279,7 +283,9 @@ def main():
                     server = root_config['server']
                     host = server.get('host', '0.0.0.0')
                     port = server.get('http_port', 8000)
-                    tcp_host = server.get('host', '0.0.0.0')
+                    # TCP 서버는 항상 0.0.0.0으로 바인딩
+                    # config.json의 host는 클라이언트 접속용 IP이므로 서버 바인딩에는 사용하지 않음
+                    tcp_host = '0.0.0.0'
                     tcp_port = server.get('tcp_port', 5500)
         except Exception as e:
             print(f"루트 설정 파일 로드 실패: {e}, 환경변수 사용")
