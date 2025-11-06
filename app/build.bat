@@ -34,9 +34,13 @@ echo.
 echo EXE 빌드 중...
 if exist OpsHubAgent.spec (
     echo spec 파일을 사용하여 빌드합니다...
+    rem 루트 config.json을 app\config.json으로 복사하여 단일 소스로 포함
+    if exist ..\config.json copy /Y ..\config.json config.json >nul
     pyinstaller OpsHubAgent.spec
 ) else (
     echo spec 파일이 없어서 새로 생성합니다...
+    rem 루트 config.json을 app\config.json으로 복사하여 단일 소스로 포함
+    if exist ..\config.json copy /Y ..\config.json config.json >nul
     pyinstaller --onefile ^
         --name OpsHubAgent ^
         --console ^

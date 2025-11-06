@@ -75,59 +75,50 @@ class Config:
         """설정 파일 로드"""
         config = self.default_config.copy()
         
-        # 1. app/config.json에서 서버 설정 읽기 (우선순위 높음)
-        if self.app_config_file and self.app_config_file.exists():
-            try:
-                print(f"app 설정 파일 로드 중: {self.app_config_file}")
-                with open(self.app_config_file, 'r', encoding='utf-8') as f:
-                    app_config = json.load(f)
-                    # 서버 설정 병합
-                    if 'server' in app_config:
-                        server = app_config['server']
-                        config['server_host'] = server.get('host', config['server_host'])
-                        config['server_tcp_port'] = server.get('tcp_port', config['server_tcp_port'])
-                        config['server_url'] = f"http://{server.get('host', config['server_host'])}:{server.get('http_port', 8000)}"
-                        print(f"서버 설정 로드: {config['server_host']}:{config['server_tcp_port']} (URL: {config['server_url']})")
-                    # 에이전트 설정 병합
-                    if 'agent' in app_config:
-                        agent = app_config['agent']
-                        config['poll_interval'] = agent.get('poll_interval', config['poll_interval'])
-                        config['request_status_interval'] = agent.get('request_status_interval', config['request_status_interval'])
-                        config['auto_start'] = agent.get('auto_start', config['auto_start'])
-                        config['version'] = agent.get('version', config['version'])
+        # 루트 config.json을 단일 소스(true source)로 사용
+        # - 개발 환경: 루트 config.json 우선
+        # - 동결(EXE) 환경: exe 옆 config.json(app_config_file) 우선
+        try:
+            prefer_root = not getattr(sys, 'frozen', False)
+            loaded_from = None
+            cfg_path = None
+            if prefer_root and self.root_config_file and self.root_config_file.exists():
+                cfg_path = self.root_config_file
+                loaded_from = 'root'
+            elif self.app_config_file and self.app_config_file.exists():
+                cfg_path = self.app_config_file
+                loaded_from = 'app'
+            
+            if cfg_path:
+                print(f"설정 파일 로드 중({loaded_from}): {cfg_path}")
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    merged = json.load(f)
+                    # 서버 설정
+                    if 'server' in merged:
+                        server = merged['server']
+                        host = server.get('host', config['server_host'])
+                        http_port = server.get('http_port', 8000)
+                        tcp_port = server.get('tcp_port', config['server_tcp_port'])
+                        config['server_host'] = host
+                        config['server_tcp_port'] = tcp_port
+                        config['server_url'] = f"http://{host}:{http_port}"
+                        print(f"서버 설정 로드: {config['server_host']}:{http_port} (TCP:{config['server_tcp_port']})")
+                    # 에이전트 설정
+                    if 'agent' in merged:
+                        agent = merged['agent']
+                        if 'poll_interval' in agent:
+                            config['poll_interval'] = agent['poll_interval']
+                        if 'request_status_interval' in agent:
+                            config['request_status_interval'] = agent['request_status_interval']
+                        if 'auto_start' in agent:
+                            config['auto_start'] = agent['auto_start']
+                        if 'version' in agent:
+                            config['version'] = agent['version']
                         print(f"에이전트 설정 로드: poll_interval={config['poll_interval']}, version={config['version']}")
-            except Exception as e:
-                print(f"app 설정 파일 로드 실패: {e}")
-        else:
-            print("app/config.json 파일을 찾을 수 없습니다. 기본값을 사용합니다.")
-        
-        # 2. 루트 config.json에서 서버 설정 읽기 (app/config.json에서 설정하지 않은 경우에만)
-        # app/config.json이 없거나 서버 설정이 없는 경우에만 루트 설정 사용
-        if self.root_config_file and self.root_config_file.exists():
-            # app/config.json에서 서버 설정을 읽지 못한 경우에만 루트 설정 사용
-            if not self.app_config_file or not self.app_config_file.exists():
-                try:
-                    with open(self.root_config_file, 'r', encoding='utf-8') as f:
-                        root_config = json.load(f)
-                        # 서버 설정 병합 (아직 설정되지 않은 경우)
-                        if 'server' in root_config and config.get('server_host') == self.default_config['server_host']:
-                            server = root_config['server']
-                            config['server_host'] = server.get('host', config['server_host'])
-                            config['server_tcp_port'] = server.get('tcp_port', config['server_tcp_port'])
-                            config['server_url'] = f"http://{server.get('host', config['server_host'])}:{server.get('http_port', 8000)}"
-                        # 에이전트 설정 병합 (아직 설정되지 않은 경우)
-                        if 'agent' in root_config:
-                            agent = root_config['agent']
-                            if config.get('poll_interval') == self.default_config['poll_interval']:
-                                config['poll_interval'] = agent.get('poll_interval', config['poll_interval'])
-                            if config.get('request_status_interval') == self.default_config['request_status_interval']:
-                                config['request_status_interval'] = agent.get('request_status_interval', config['request_status_interval'])
-                            if config.get('auto_start') == self.default_config['auto_start']:
-                                config['auto_start'] = agent.get('auto_start', config['auto_start'])
-                            if config.get('version') == self.default_config['version']:
-                                config['version'] = agent.get('version', config['version'])
-                except Exception as e:
-                    print(f"루트 설정 파일 로드 실패: {e}")
+            else:
+                print("루트/앱 config.json을 찾지 못했습니다. 기본값을 사용합니다.")
+        except Exception as e:
+            print(f"설정 파일 로드 실패: {e}")
         
         # 3. 로컬 config.json에서 설정 읽기 (사용자별 설정만 - agent_id, token 등)
         # 서버 설정(server_host, server_url)은 app/config.json을 우선시

@@ -20,14 +20,24 @@ class APIClient:
     def _request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict[str, Any]]:
         """API 요청 헬퍼"""
         url = f"{self.base_url}/api{endpoint}"
-        
         try:
             response = self.session.request(method, url, timeout=10, **kwargs)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            status = getattr(e.response, 'status_code', 'unknown')
+            print(f"API 요청 실패 [{method} {endpoint}] HTTP {status}: {e}")
+            return None
         except requests.exceptions.RequestException as e:
             print(f"API 요청 실패 [{method} {endpoint}]: {e}")
             return None
+
+    def _set_auth(self, agent_token: Optional[str]):
+        """인증 헤더 설정(토큰 있으면 추가, 없으면 제거)"""
+        if agent_token:
+            self.session.headers['Authorization'] = f'Bearer {agent_token}'
+        else:
+            self.session.headers.pop('Authorization', None)
     
     def register_request(self, system_info: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """PC 등록 승인 요청"""
@@ -69,19 +79,19 @@ class APIClient:
     
     def send_heartbeat(self, agent_id: str, agent_token: str) -> bool:
         """하트비트 전송"""
-        self.session.headers['Authorization'] = f'Bearer {agent_token}'
+        self._set_auth(agent_token)
         result = self._request('POST', f'/agents/{agent_id}/heartbeat')
         return result is not None
     
     def poll_tasks(self, agent_id: str, agent_token: str, want_n: int = 1) -> Optional[Dict[str, Any]]:
         """작업 폴링"""
-        self.session.headers['Authorization'] = f'Bearer {agent_token}'
+        self._set_auth(agent_token)
         payload = {'want_n': want_n}
         return self._request('POST', f'/agents/{agent_id}/tasks/poll', json=payload)
     
     def submit_result(self, agent_id: str, agent_token: str, result: Dict[str, Any]) -> bool:
         """작업 결과 제출"""
-        self.session.headers['Authorization'] = f'Bearer {agent_token}'
+        self._set_auth(agent_token)
         response = self._request('POST', f'/agents/{agent_id}/tasks/results', json=result)
         return response is not None
 

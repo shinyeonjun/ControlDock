@@ -90,19 +90,11 @@ class Agent:
         
         while self.running:
             try:
-                # 하트비트 전송
-                heartbeat_success = self._send_heartbeat(agent_id, agent_token)
-                
-                # 상태 업데이트
-                if heartbeat_success:
-                    self.status = 'online'
-                else:
-                    self.status = 'offline'
+                # 하트비트 전송 및 상태 반영
+                self.status = 'online' if self._send_heartbeat(agent_id, agent_token) else 'offline'
                 self._update_tray_status()
-                
                 # 작업 폴링
                 self._poll_tasks(agent_id, agent_token)
-                
                 # 폴링 간격 대기
                 time.sleep(self.config.poll_interval)
                 
