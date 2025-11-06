@@ -39,7 +39,7 @@ if exist OpsHubAgent.spec (
     echo spec 파일이 없어서 새로 생성합니다...
     pyinstaller --onefile ^
         --name OpsHubAgent ^
-        --console ^
+        --noconsole ^
         --add-data "config.json;." ^
         --hidden-import=requests ^
         --hidden-import=win32timezone ^
