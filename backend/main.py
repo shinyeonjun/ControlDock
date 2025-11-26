@@ -1,39 +1,45 @@
 """
 OpsHub 메인 서버
-FastAPI + Uvicorn 기반
+순수 HTTP/TCP/UDP 서버 기반 (FastAPI 제거)
 """
 import asyncio
-import uvicorn
-from fastapi import FastAPI, HTTPException, Body
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
-from contextlib import asynccontextmanager
-from typing import List, Dict, Any
+import os
+import json
 from pathlib import Path
+from dotenv import load_dotenv
+from server.http_server import HTTPServer
 from server.pc_regis.tcp_server import TCPRegistrationServer
+from server.udp_server import UDPServer
+from database.db import init_db, close_db
 
-# TCP 서버 인스턴스
+# 서버 인스턴스
+http_server: HTTPServer = None
 tcp_server: TCPRegistrationServer = None
+udp_server: UDPServer = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """애플리케이션 생명주기 관리"""
-    global tcp_server
+async def main():
+    """메인 함수 - 모든 서버 시작"""
+    global http_server, tcp_server, udp_server
     
-    # 시작 시 TCP 서버 시작
-    print("서버 시작 중...")
-    import os
-    import json
-    from pathlib import Path
-    from dotenv import load_dotenv
     load_dotenv()
     
-    # 루트 config.json에서 설정 읽기
-    # backend/main.py -> backend -> 프로젝트 루트
+    print("=" * 50)
+    print("OpsHub 서버 시작 중...")
+    print("=" * 50)
+    
+    # DB 초기화
+    print("\n[DB] 데이터베이스 초기화 중...")
+    await init_db()
+    print("[DB] 데이터베이스 초기화 완료")
+    
+    # 설정 파일 읽기
     root_config_file = Path(__file__).parent.parent / 'config.json'
+    http_host = '0.0.0.0'
+    http_port = 8000
     tcp_host = '0.0.0.0'
     tcp_port = 5500
+    udp_heartbeat_port = 5501
+    udp_notification_port = 5502
     
     if root_config_file.exists():
         try:
@@ -41,345 +47,101 @@ async def lifespan(app: FastAPI):
                 root_config = json.load(f)
                 if 'server' in root_config:
                     server = root_config['server']
-                    # TCP 서버는 항상 0.0.0.0으로 바인딩 (모든 네트워크 인터페이스에서 접근 가능)
-                    # config.json의 host는 클라이언트가 접속할 서버 IP이지, 서버 바인딩 주소가 아님
-                    # tcp_host는 0.0.0.0으로 유지
+                    http_port = server.get('http_port', 8000)
                     tcp_port = server.get('tcp_port', 5500)
         except Exception as e:
-            print(f"루트 설정 파일 로드 실패: {e}, 환경변수 사용")
+            print(f"[설정] 설정 파일 로드 실패: {e}, 기본값 사용")
     
-    # 환경변수가 있으면 우선 사용
+    # 환경변수 우선 사용
+    http_host = os.getenv('HTTP_HOST', http_host)
+    http_port = int(os.getenv('HTTP_PORT', str(http_port)))
     tcp_host = os.getenv('TCP_HOST', tcp_host)
     tcp_port = int(os.getenv('TCP_PORT', str(tcp_port)))
+    udp_heartbeat_port = int(os.getenv('UDP_HEARTBEAT_PORT', str(udp_heartbeat_port)))
+    udp_notification_port = int(os.getenv('UDP_NOTIFICATION_PORT', str(udp_notification_port)))
     
+    # 서버 인스턴스 생성
+    print("\n[HTTP] HTTP 서버 생성 중...")
+    http_server = HTTPServer(host=http_host, port=http_port)
+    
+    print("\n[TCP] TCP 서버 생성 중...")
     tcp_server = TCPRegistrationServer(host=tcp_host, port=tcp_port)
     
-    # 백그라운드 태스크로 TCP 서버 실행
+    print("\n[UDP] UDP 서버 생성 중...")
+    udp_server = UDPServer(
+        heartbeat_port=udp_heartbeat_port,
+        notification_port=udp_notification_port
+    )
+    
+    # HTTP 서버에 TCP 서버 참조 설정
+    http_server.set_tcp_server(tcp_server)
+    
+    # 모든 서버 시작
+    print("\n" + "=" * 50)
+    print("서버 시작 중...")
+    print("=" * 50)
+    
+    # HTTP 서버 시작
+    await http_server.start()
+    
+    # UDP 서버 시작
+    await udp_server.start()
+    
+    # TCP 서버를 백그라운드 태스크로 시작
     tcp_task = asyncio.create_task(tcp_server.start())
     
-    yield
+    print("\n" + "=" * 50)
+    print("모든 서버가 시작되었습니다!")
+    print(f"  - HTTP 서버: http://{http_host}:{http_port}")
+    print(f"  - TCP 서버: {tcp_host}:{tcp_port}")
+    print(f"  - UDP 하트비트: {http_host}:{udp_heartbeat_port}")
+    print(f"  - UDP 공지: {http_host}:{udp_notification_port}")
+    print("=" * 50)
+    print("\n종료하려면 Ctrl+C를 누르세요.\n")
     
-    # 종료 시 TCP 서버 중지
+    # 모든 서버가 실행 중인 상태로 유지
+    try:
+        await tcp_task
+    except asyncio.CancelledError:
+        pass
+
+async def shutdown():
+    """서버 종료"""
+    global http_server, tcp_server, udp_server
+    
+    print("\n" + "=" * 50)
     print("서버 종료 중...")
+    print("=" * 50)
+    
+    if http_server:
+        await http_server.stop()
+    
     if tcp_server:
         await tcp_server.stop()
-        tcp_task.cancel()
-        try:
-            await tcp_task
-        except asyncio.CancelledError:
-            pass
+    
+    if udp_server:
+        await udp_server.stop()
+    
+    # DB 연결 종료
+    await close_db()
+    
+    print("서버 종료 완료")
 
-# FastAPI 앱 생성
-app = FastAPI(
-    title="OpsHub Server",
-    description="OpsHub PC 원격 관리 서버",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# CORS 설정 (프론트엔드 접근 허용)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 개발용, 프로덕션에서는 특정 도메인만 허용
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 프론트엔드 정적 파일 경로 설정
-# backend/main.py -> backend -> 프로젝트 루트 -> frontend
-root_dir = Path(__file__).parent.parent
-frontend_dir = root_dir / 'frontend'
-html_dir = frontend_dir / 'html'
-css_dir = frontend_dir / 'css'
-js_dir = frontend_dir / 'js'
-config_file = root_dir / 'config.json'
-
-# 정적 파일 마운트
-if css_dir.exists():
-    app.mount("/css", StaticFiles(directory=str(css_dir)), name="css")
-if js_dir.exists():
-    app.mount("/js", StaticFiles(directory=str(js_dir)), name="js")
-
-@app.get("/config.json")
-async def get_config():
-    """루트 config.json 파일 서빙"""
-    if config_file.exists():
-        return FileResponse(str(config_file))
-    raise HTTPException(status_code=404, detail="config.json not found")
-
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    """루트 엔드포인트 - 대시보드 메인 페이지"""
-    index_file = html_dir / 'index.html'
-    if index_file.exists():
-        with open(index_file, 'r', encoding='utf-8') as f:
-            return f.read()
-    return HTMLResponse(content="<h1>OpsHub Server</h1><p>Index file not found</p>", status_code=404)
-
-@app.get("/index.html", response_class=HTMLResponse)
-async def index():
-    """대시보드 메인 페이지"""
-    index_file = html_dir / 'index.html'
-    if index_file.exists():
-        with open(index_file, 'r', encoding='utf-8') as f:
-            return f.read()
-    raise HTTPException(status_code=404, detail="Page not found")
-
-@app.get("/agents.html", response_class=HTMLResponse)
-async def agents():
-    """에이전트 페이지"""
-    agents_file = html_dir / 'agents.html'
-    if agents_file.exists():
-        with open(agents_file, 'r', encoding='utf-8') as f:
-            return f.read()
-    raise HTTPException(status_code=404, detail="Page not found")
-
-@app.get("/deployments.html", response_class=HTMLResponse)
-async def deployments():
-    """배포 페이지"""
-    deployments_file = html_dir / 'deployments.html'
-    if deployments_file.exists():
-        with open(deployments_file, 'r', encoding='utf-8') as f:
-            return f.read()
-    raise HTTPException(status_code=404, detail="Page not found")
-
-@app.get("/announcements.html", response_class=HTMLResponse)
-async def announcements():
-    """공지 페이지"""
-    announcements_file = html_dir / 'announcements.html'
-    if announcements_file.exists():
-        with open(announcements_file, 'r', encoding='utf-8') as f:
-            return f.read()
-    raise HTTPException(status_code=404, detail="Page not found")
-
-@app.get("/health")
-async def health():
-    """헬스 체크"""
-    return {
-        "status": "healthy",
-        "tcp_server": "running" if tcp_server else "stopped"
-    }
-
-# 등록 요청 API
-@app.get("/api/registration-requests")
-async def get_registration_requests() -> List[Dict[str, Any]]:
-    """등록 요청 목록 조회"""
-    if not tcp_server:
-        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
-    
-    requests = tcp_server.get_registration_requests()
-    return requests
-
-@app.get("/api/registration-requests/{request_id}")
-async def get_registration_request(request_id: str) -> Dict[str, Any]:
-    """등록 요청 조회"""
-    if not tcp_server:
-        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
-    
-    request = tcp_server.get_registration_request(request_id)
-    if not request:
-        raise HTTPException(status_code=404, detail="등록 요청을 찾을 수 없습니다")
-    
-    return request
-
-@app.post("/api/registration-requests/{request_id}/approve")
-async def approve_registration(request_id: str) -> Dict[str, Any]:
-    """등록 요청 승인"""
-    if not tcp_server:
-        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
-    
-    success = tcp_server.approve_registration(request_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="등록 요청을 승인할 수 없습니다")
-    
-    # 승인 후 즉시 등록 완료 처리 (테스트용)
-    # 실제로는 클라이언트가 상세 정보를 보내면 완료 처리
-    import uuid
-    import secrets
-    agent_id = str(uuid.uuid4())
-    agent_token = secrets.token_urlsafe(32)
-    tcp_server.complete_registration(request_id, agent_id, agent_token)
-    
-    request = tcp_server.get_registration_request(request_id)
-    return {
-        "success": True,
-        "message": "등록이 승인되었습니다",
-        "request": request
-    }
-
-# 대시보드 API
-@app.get("/api/stats")
-async def get_stats() -> Dict[str, Any]:
-    """대시보드 통계 데이터"""
-    if not tcp_server:
-        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
-    
-    # 등록된 에이전트 수 (completed 상태)
-    requests = tcp_server.get_registration_requests()
-    completed_requests = [r for r in requests if r.get('status') == 'completed']
-    pending_requests = [r for r in requests if r.get('status') == 'pending']
-    
-    return {
-        "totalAgents": len(completed_requests),
-        "onlineAgents": len(completed_requests),  # 일단 등록된 수 = 온라인 수
-        "offlineAgents": 0,
-        "pendingRegistrations": len(pending_requests),
-        "totalDeployments": 0,
-        "successfulDeployments": 0,
-        "failedDeployments": 0
-    }
-
-@app.get("/api/agents/recent")
-async def get_recent_agents() -> List[Dict[str, Any]]:
-    """최근 에이전트 활동"""
-    if not tcp_server:
-        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
-    
-    requests = tcp_server.get_registration_requests()
-    completed_requests = [r for r in requests if r.get('status') == 'completed']
-    
-    # 최근 5개만 반환
-    recent = sorted(completed_requests, key=lambda x: x.get('completed_at', ''), reverse=True)[:5]
-    
-    return recent
-
-@app.get("/api/deployments/recent")
-async def get_recent_deployments() -> List[Dict[str, Any]]:
-    """최근 배포 결과 (임시 - 아직 구현 안됨)"""
-    return []
-
-@app.get("/api/system/status")
-async def get_system_status() -> Dict[str, Any]:
-    """시스템 상태"""
-    return {
-        "server": "running",
-        "tcp_server": "running" if tcp_server else "stopped",
-        "database": "connected"  # 임시
-    }
-
-# 에이전트 API
-@app.post("/api/agents/{agent_id}/heartbeat")
-async def agent_heartbeat(agent_id: str) -> Dict[str, Any]:
-    """에이전트 하트비트"""
-    if not tcp_server:
-        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
-    
-    # 등록 요청에서 agent_id로 찾기
-    requests = tcp_server.get_registration_requests()
-    agent_request = next((r for r in requests if r.get('agent_id') == agent_id), None)
-    
-    if not agent_request:
-        # agent_id를 찾을 수 없으면 재등록 필요 (410 Gone - 리소스가 영구적으로 제거됨)
-        raise HTTPException(
-            status_code=410,
-            detail="에이전트를 찾을 수 없습니다. 서버가 재시작되어 등록 정보가 초기화되었습니다. 재등록이 필요합니다."
-        )
-    
-    # 하트비트 시간 업데이트 (메모리 기반, 향후 DB로 변경)
-    from datetime import datetime
-    agent_request['last_heartbeat'] = datetime.utcnow().isoformat()
-    
-    return {
-        "success": True,
-        "message": "하트비트 수신됨"
-    }
-
-@app.post("/api/agents/{agent_id}/tasks/poll")
-async def agent_poll_tasks(agent_id: str, payload: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
-    """작업 폴링"""
-    if not tcp_server:
-        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
-    
-    # 등록 요청에서 agent_id로 찾기
-    requests = tcp_server.get_registration_requests()
-    agent_request = next((r for r in requests if r.get('agent_id') == agent_id), None)
-    
-    if not agent_request:
-        # agent_id를 찾을 수 없으면 재등록 필요 (410 Gone - 리소스가 영구적으로 제거됨)
-        raise HTTPException(
-            status_code=410,
-            detail="에이전트를 찾을 수 없습니다. 서버가 재시작되어 등록 정보가 초기화되었습니다. 재등록이 필요합니다."
-        )
-    
-    # 현재는 작업이 없음을 반환 (향후 작업 큐 구현)
-    return {
-        "no_task": True,
-        "message": "현재 작업이 없습니다"
-    }
-
-@app.post("/api/agents/{agent_id}/tasks/results")
-async def agent_submit_result(agent_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    """작업 결과 제출"""
-    if not tcp_server:
-        raise HTTPException(status_code=503, detail="TCP 서버가 실행되지 않았습니다")
-    
-    # 등록 요청에서 agent_id로 찾기
-    requests = tcp_server.get_registration_requests()
-    agent_request = next((r for r in requests if r.get('agent_id') == agent_id), None)
-    
-    if not agent_request:
-        raise HTTPException(status_code=404, detail="에이전트를 찾을 수 없습니다")
-    
-    # 결과 저장 (메모리 기반, 향후 DB로 변경)
-    if 'results' not in agent_request:
-        agent_request['results'] = []
-    agent_request['results'].append(result)
-    
-    return {
-        "success": True,
-        "message": "결과 제출 완료"
-    }
-
-def main():
-    """메인 함수"""
-    import os
-    import json
-    from pathlib import Path
-    from dotenv import load_dotenv
-    
-    load_dotenv()
-    
-    # 루트 config.json에서 설정 읽기
-    # backend/main.py -> backend -> 프로젝트 루트
-    root_config_file = Path(__file__).parent.parent / 'config.json'
-    host = '0.0.0.0'
-    port = 8000
-    tcp_host = '0.0.0.0'
-    tcp_port = 5500
-    
-    if root_config_file.exists():
-        try:
-            with open(root_config_file, 'r', encoding='utf-8') as f:
-                root_config = json.load(f)
-                if 'server' in root_config:
-                    server = root_config['server']
-                    # HTTP 서버도 항상 0.0.0.0으로 바인딩 (WSL에서 외부 접근 가능하도록)
-                    # config.json의 host는 클라이언트 접속용 IP이므로 서버 바인딩에는 사용하지 않음
-                    host = '0.0.0.0'
-                    port = server.get('http_port', 8000)
-                    # TCP 서버도 항상 0.0.0.0으로 바인딩
-                    tcp_host = '0.0.0.0'
-                    tcp_port = server.get('tcp_port', 5500)
-        except Exception as e:
-            print(f"루트 설정 파일 로드 실패: {e}, 환경변수 사용")
-    
-    # 환경변수가 있으면 우선 사용
-    host = os.getenv('HOST', host)
-    port = int(os.getenv('PORT', str(port)))
-    tcp_host = os.getenv('TCP_HOST', tcp_host)
-    tcp_port = int(os.getenv('TCP_PORT', str(tcp_port)))
-    
-    print(f"서버 시작: HTTP {host}:{port}, TCP {tcp_host}:{tcp_port}")
-    
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=True,
-        log_level="info"
-    )
+async def run_server():
+    """서버 실행 래퍼"""
+    try:
+        await main()
+    except KeyboardInterrupt:
+        print("\n\n키보드 인터럽트 감지")
+    except Exception as e:
+        print(f"\n\n서버 오류: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        await shutdown()
 
 if __name__ == "__main__":
-    main()
-
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        print("\n서버 종료 중...")

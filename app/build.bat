@@ -7,10 +7,11 @@ echo ========================================
 
 cd /d %~dp0
 
-REM PyInstaller 설치 확인
+REM 필요한 패키지 설치 확인
 echo.
-echo PyInstaller 설치 확인 중...
-python -m pip install pyinstaller --upgrade
+echo 필요한 패키지 설치 확인 중...
+python -m pip install --upgrade pyinstaller requests urllib3 certifi charset-normalizer idna
+python -m pip install -r requirements.txt
 
 REM 빌드 디렉토리 정리
 echo.

@@ -56,41 +56,64 @@ def run_as_console():
             def on_approve():
                 """등록 승인 처리 - 등록 요청 전송"""
                 print("등록 요청 전송 중...")
+                print(f"[DEBUG] 서버 설정 확인:")
+                print(f"  - server_host: {config.server_host}")
+                print(f"  - server_tcp_port: {config.server_tcp_port}")
+                print(f"  - server_url: {config.server_url}")
                 
                 # TCP 클라이언트로 등록 요청 전송
-                tcp_client = TCPClient(host=config.server_host, port=config.server_tcp_port)
-                response = tcp_client.send_registration_request(
-                    system_info['hostname'],
-                    system_info['os'],
-                    config.get('version', '1.0.0')
-                )
-                
-                if response and response.get('success'):
-                    request_id = response.get('request_id')
-                    print(f"등록 요청 전송 완료: request_id={request_id}")
-                    print("대시보드에서 승인을 기다려주세요.")
+                try:
+                    tcp_client = TCPClient(host=config.server_host, port=config.server_tcp_port)
+                    print(f"[DEBUG] TCP 클라이언트 생성 완료: {tcp_client.host}:{tcp_client.port}")
                     
-                    # request_id를 config에 저장 (Agent가 상태 확인할 때 사용)
-                    config.set('registration_request_id', request_id)
+                    response = tcp_client.send_registration_request(
+                        system_info['hostname'],
+                        system_info['os'],
+                        config.get('version', '1.0.0')
+                    )
                     
-                    # 등록 요청 완료 알림 다이얼로그 표시
-                    from PyQt6.QtWidgets import QApplication, QMessageBox
-                    msg = QMessageBox()
-                    msg.setWindowTitle('등록 요청 전송 완료')
-                    msg.setText(f'등록 요청이 전송되었습니다.\n\n요청 ID: {request_id}\n호스트명: {system_info["hostname"]}')
-                    msg.setInformativeText('대시보드에서 관리자가 승인하면 등록이 완료됩니다.')
-                    msg.setIcon(QMessageBox.Icon.Information)
-                    msg.exec()
-                else:
-                    error = response.get('error', '알 수 없는 오류') if response else '서버 연결 실패'
-                    print(f"등록 요청 실패: {error}")
+                    if response and response.get('success'):
+                        request_id = response.get('request_id')
+                        print(f"등록 요청 전송 완료: request_id={request_id}")
+                        print("대시보드에서 승인을 기다려주세요.")
+                        
+                        # request_id를 config에 저장 (Agent가 상태 확인할 때 사용)
+                        config.set('registration_request_id', request_id)
+                        
+                        # 등록 요청 완료 알림 다이얼로그 표시
+                        from PyQt6.QtWidgets import QApplication, QMessageBox
+                        msg = QMessageBox()
+                        msg.setWindowTitle('등록 요청 전송 완료')
+                        msg.setText(f'등록 요청이 전송되었습니다.\n\n요청 ID: {request_id}\n호스트명: {system_info["hostname"]}')
+                        msg.setInformativeText('대시보드에서 관리자가 승인하면 등록이 완료됩니다.')
+                        msg.setIcon(QMessageBox.Icon.Information)
+                        msg.exec()
+                    else:
+                        error = response.get('error', '알 수 없는 오류') if response else '서버 연결 실패'
+                        print(f"등록 요청 실패: {error}")
+                        print(f"[DEBUG] 응답 내용: {response}")
+                        
+                        # 오류 메시지 표시
+                        from PyQt6.QtWidgets import QApplication, QMessageBox
+                        msg = QMessageBox()
+                        msg.setWindowTitle('등록 요청 실패')
+                        msg.setText(f'등록 요청 전송에 실패했습니다.\n\n오류: {error}\n\n서버: {config.server_host}:{config.server_tcp_port}')
+                        msg.setInformativeText('서버가 실행 중인지 확인하고, 방화벽 설정을 확인해주세요.')
+                        msg.setIcon(QMessageBox.Icon.Warning)
+                        msg.exec()
+                except Exception as e:
+                    error_msg = f"TCP 클라이언트 생성 오류: {e}"
+                    print(f"[ERROR] {error_msg}")
+                    import traceback
+                    traceback.print_exc()
                     
                     # 오류 메시지 표시
                     from PyQt6.QtWidgets import QApplication, QMessageBox
                     msg = QMessageBox()
                     msg.setWindowTitle('등록 요청 실패')
-                    msg.setText(f'등록 요청 전송에 실패했습니다.\n\n오류: {error}')
-                    msg.setIcon(QMessageBox.Icon.Warning)
+                    msg.setText(f'등록 요청 전송에 실패했습니다.\n\n오류: {error_msg}')
+                    msg.setInformativeText(f'서버 설정을 확인해주세요.\n서버: {config.server_host}:{config.server_tcp_port}')
+                    msg.setIcon(QMessageBox.Icon.Critical)
                     msg.exec()
             
             def on_cancel():

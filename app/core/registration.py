@@ -76,7 +76,8 @@ class RegistrationManager:
             if agent_id:
                 self.config.agent_id = agent_id
             if agent_token:
-                self.config.save_agent_token(agent_token)
+                # 토큰은 메모리에만 캐싱 (로컬 파일 저장 안 함)
+                self.config.set_agent_token(agent_token)
             
             print(f"등록 완료: agent_id={agent_id}")
             
@@ -641,6 +642,7 @@ class RegistrationManager:
             time.sleep(check_interval)
     
     def is_registered(self) -> bool:
-        """등록 여부 확인"""
-        return self.config.agent_id is not None and self.config.get_agent_token() is not None
+        """등록 여부 확인 (agent_id만 체크, 토큰은 서버에서 가져옴)"""
+        # agent_id만 있으면 등록된 것으로 간주 (토큰은 서버에서 가져올 수 있음)
+        return self.config.agent_id is not None
 

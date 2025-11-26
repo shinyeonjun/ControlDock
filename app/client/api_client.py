@@ -107,4 +107,12 @@ class APIClient:
         self._set_auth(agent_token)
         response = self._request('POST', f'/agents/{agent_id}/tasks/results', json=result)
         return response is not None
+    
+    def get_agent_token(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """agent_id로 토큰 조회"""
+        return self._request('GET', f'/agents/{agent_id}/token')
+    
+    def get_agent_config(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """agent_id로 설정 조회 (DB에서 가져옴)"""
+        return self._request('GET', f'/agents/{agent_id}/config')
 

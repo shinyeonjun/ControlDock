@@ -71,10 +71,20 @@ class Agent:
         
         # 등록된 에이전트: 하트비트 및 작업 폴링
         agent_id = self.config.agent_id
-        agent_token = self.config.get_agent_token()
         
-        if not agent_id or not agent_token:
-            print("에이전트 ID 또는 토큰이 없습니다.")
+        if not agent_id:
+            print("에이전트 ID가 없습니다.")
+            self.status = 'offline'
+            self._update_tray_status()
+            return
+        
+        # 서버에서 설정 동기화 (DB에서 최신 설정 가져오기)
+        self._sync_config_from_server(agent_id)
+        
+        # agent_token을 서버에서 가져오기
+        agent_token = self._get_agent_token_from_server(agent_id)
+        if not agent_token:
+            print("서버에서 에이전트 토큰을 가져올 수 없습니다.")
             self.status = 'offline'
             self._update_tray_status()
             return
@@ -95,18 +105,11 @@ class Agent:
                 # 410 Gone 응답이면 재등록 필요
                 if isinstance(heartbeat_result, dict) and heartbeat_result.get('_needs_reregistration'):
                     print("서버에서 에이전트를 찾을 수 없습니다. 재등록을 시작합니다...")
-                    # agent_id와 agent_token 초기화
+                    # agent_id 초기화 (토큰은 메모리 캐시만 있으므로 자동으로 사라짐)
                     self.config.agent_id = None
                     self.config.set('agent_id', None)
-                    if hasattr(self.config, 'agent_token_file'):
-                        # agent_token.txt 파일도 삭제
-                        import os
-                        token_file = self.config.agent_token_file
-                        if token_file and os.path.exists(token_file):
-                            try:
-                                os.remove(token_file)
-                            except:
-                                pass
+                    if hasattr(self.config, '_cached_token'):
+                        delattr(self.config, '_cached_token')
                     # registration_request_id도 초기화
                     self.registration.request_id = None
                     self.config.set('registration_request_id', None)
@@ -258,6 +261,50 @@ class Agent:
     def get_status(self) -> str:
         """현재 상태 반환"""
         return self.status
+    
+    def _sync_config_from_server(self, agent_id: str):
+        """서버에서 설정 동기화 (DB에서 최신 설정 가져오기)"""
+        try:
+            response = self.client.get_agent_config(agent_id)
+            if response and response.get('success'):
+                server_config = response.get('config', {})
+                
+                # 서버에서 가져온 설정으로 업데이트 (로컬 파일에는 저장하지 않음)
+                # poll_interval 등은 메모리에서만 사용
+                if 'poll_interval' in server_config:
+                    self.config._config['poll_interval'] = server_config['poll_interval']
+                    print(f"설정 동기화: poll_interval={server_config['poll_interval']}")
+                
+                if 'request_status_interval' in server_config:
+                    self.config._config['request_status_interval'] = server_config['request_status_interval']
+                
+                if 'version' in server_config:
+                    self.config._config['version'] = server_config['version']
+                
+                print("서버에서 설정 동기화 완료")
+        except Exception as e:
+            print(f"서버에서 설정 동기화 실패: {e} (기본값 사용)")
+    
+    def _get_agent_token_from_server(self, agent_id: str) -> Optional[str]:
+        """서버에서 agent_token 가져오기 (캐싱)"""
+        # 메모리에 캐싱된 토큰이 있으면 사용
+        cached_token = self.config.get_agent_token()
+        if cached_token:
+            return cached_token
+        
+        # 서버에서 토큰 가져오기
+        try:
+            response = self.client.get_agent_token(agent_id)
+            if response and response.get('success'):
+                token = response.get('agent_token')
+                if token:
+                    # 메모리에 캐싱
+                    self.config.set_agent_token(token)
+                    return token
+        except Exception as e:
+            print(f"서버에서 토큰 가져오기 실패: {e}")
+        
+        return None
     
     def _poll_tasks(self, agent_id: str, agent_token: str):
         """작업 폴링"""
