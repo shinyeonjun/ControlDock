@@ -13,9 +13,10 @@ from database.registration_db import (
     get_registration_requests,
     approve_registration,
     complete_registration,
-    update_heartbeat,
     get_registration_by_agent_id
 )
+from server.deployment_service import DeploymentService
+from server.announcement_service import AnnouncementService
 
 class TCPRegistrationServer:
     """PC 등록 TCP 서버"""
@@ -123,19 +124,66 @@ class TCPRegistrationServer:
             
             print(f"[TCP] 등록 요청 수신: hostname={hostname}, os={os_info}, version={agent_version}")
             
-            # 등록 요청 생성 (DB에 저장)
+            # 중복 체크: 이미 등록된 PC가 있는지 확인
+            from database.pc_db import get_pc_by_hostname, update_pc_token
+            import secrets
+            existing_pc = await get_pc_by_hostname(hostname)
+            if existing_pc:
+                # 이미 등록된 PC가 있으면 기존 정보 반환
+                # 클라이언트가 토큰을 사용할 수 있도록 새 토큰 생성 (기존 토큰은 해시로만 저장되어 있어서 반환 불가)
+                agent_id = existing_pc['id']
+                new_token = secrets.token_urlsafe(32)
+                
+                # 새 토큰을 DB에 저장 (해시로)
+                await update_pc_token(agent_id, new_token)
+                
+                print(f"[TCP] 중복 등록 방지: 호스트명 '{hostname}'은 이미 등록되어 있습니다. (agent_id: {agent_id})")
+                return {
+                    'success': True,
+                    'request_id': None,
+                    'message': f'이미 등록된 PC입니다. (agent_id: {agent_id})',
+                    'status': 'already_registered',
+                    'agent_id': agent_id,
+                    'agent_token': new_token  # 새 토큰 반환
+                }
+            
+            # 등록 요청 생성 (DB에 저장, 중복 체크 포함)
             request_id = await create_registration_request(hostname, os_info, agent_version)
             
-            print(f"[TCP] 등록 요청 생성: request_id={request_id}")
+            # 중복 체크 결과 확인
+            existing_req = await get_registration_request(request_id)
+            if existing_req and existing_req.get('status') == 'completed':
+                # 이미 완료된 요청이면 완료 상태 반환
+                print(f"[TCP] 이미 완료된 등록 요청: request_id={request_id}")
+                return {
+                    'success': True,
+                    'request_id': request_id,
+                    'message': '이미 등록 완료된 PC입니다.',
+                    'status': 'completed',
+                    'agent_id': existing_req.get('agent_id')
+                }
+            
+            # agent_id 생성 (클라이언트에 반환용, DB에는 저장하지 않음)
+            # payload에서 agent_id가 있으면 사용, 없으면 생성
+            # 주의: agent_id는 등록 완료 시점에 pc 테이블이 생성된 후에만
+            # registration_requests.agent_id에 저장됨 (Foreign Key 제약 때문)
+            agent_id = payload.get('agent_id')
+            if not agent_id:
+                agent_id = str(uuid.uuid4())
+            
+            print(f"[TCP] 등록 요청 생성: request_id={request_id}, agent_id={agent_id} (임시)")
             
             return {
                 'success': True,
                 'request_id': request_id,
+                'agent_id': agent_id,  # 클라이언트에 반환 (하트비트 매칭용)
                 'message': '등록 요청이 접수되었습니다. 승인을 기다려주세요.',
                 'status': 'pending'
             }
         except Exception as e:
             print(f"[TCP] 등록 요청 처리 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': str(e)
@@ -156,7 +204,7 @@ class TCPRegistrationServer:
         request = await get_registration_request(request_id)
         if request:
             # datetime 객체를 ISO 형식 문자열로 변환
-            for key in ['created_at', 'approved_at', 'completed_at', 'last_heartbeat']:
+            for key in ['created_at', 'approved_at', 'completed_at', 'rejected_at']:
                 if request.get(key) and isinstance(request[key], datetime):
                     request[key] = request[key].isoformat()
         return request
@@ -168,28 +216,26 @@ class TCPRegistrationServer:
             print(f"[TCP] 등록 요청 승인: request_id={request_id}")
         return success
     
-    async def complete_registration(self, request_id: str, agent_id: str, agent_token: str = None) -> bool:
-        """등록 완료 처리"""
-        # agent_token이 없으면 생성
-        if not agent_token:
-            import secrets
-            agent_token = secrets.token_urlsafe(32)
+    async def complete_registration(self, request_id: str, agent_id: str) -> bool:
+        """
+        등록 완료 처리
         
-        success = await complete_registration(request_id, agent_id, agent_token)
+        Note: agent_token은 pc 테이블에만 저장됨 (registration_requests에는 저장하지 않음)
+        """
+        success = await complete_registration(request_id, agent_id)
         if success:
             print(f"[TCP] 등록 완료: request_id={request_id}, agent_id={agent_id}")
         return success
     
-    async def update_heartbeat(self, agent_id: str) -> bool:
-        """하트비트 업데이트"""
-        return await update_heartbeat(agent_id)
+    # 하트비트 업데이트는 pc_db.py의 update_pc_heartbeat만 사용
+    # registration_requests 테이블에는 하트비트 정보를 저장하지 않음
     
     async def get_registration_by_agent_id(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """agent_id로 등록 요청 조회"""
         request = await get_registration_by_agent_id(agent_id)
         if request:
             # datetime 객체를 ISO 형식 문자열로 변환
-            for key in ['created_at', 'approved_at', 'completed_at', 'last_heartbeat']:
+            for key in ['created_at', 'approved_at', 'completed_at', 'rejected_at']:
                 if request.get(key) and isinstance(request[key], datetime):
                     request[key] = request[key].isoformat()
         return request
@@ -213,17 +259,32 @@ class TCPRegistrationServer:
                     're_register': True
                 }
             
-            # TODO: DB에서 작업 큐 조회 (deployments 테이블)
-            # 현재는 작업 없음 반환
-            print(f"[TCP] 작업 폴링: agent_id={agent_id}")
+            # 배포 서비스를 통해 작업 조회
+            task = await DeploymentService.poll_task(agent_id)
             
-            return {
-                'success': True,
-                'no_task': True,
-                'message': '현재 작업이 없습니다'
-            }
+            if task:
+                print(f"[TCP] 작업 할당: agent_id={agent_id}, task_id={task['task_id']}")
+                return {
+                    'success': True,
+                    'task': {
+                        'task_id': task['task_id'],
+                        'deployment_id': task['deployment_id'],
+                        'command': task['command'],
+                        'timeout': task['timeout'],
+                        'admin_required': task.get('admin_required', False)
+                    }
+                }
+            else:
+                print(f"[TCP] 작업 없음: agent_id={agent_id}")
+                return {
+                    'success': True,
+                    'no_task': True,
+                    'message': '현재 작업이 없습니다'
+                }
         except Exception as e:
             print(f"[TCP] 작업 폴링 처리 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': str(e)
@@ -250,15 +311,35 @@ class TCPRegistrationServer:
                     'error': '에이전트를 찾을 수 없습니다'
                 }
             
-            # TODO: DB에 결과 저장 (deployment_results 테이블)
-            print(f"[TCP] 작업 결과 수신: agent_id={agent_id}, task_id={task_id}, result={result_data}")
+            # 결과 데이터 파싱
+            status = result_data.get('status', 'failed')  # success, failed, timeout
+            exit_code = result_data.get('exit_code', -1)
+            log_summary = result_data.get('log_summary', '')
             
-            return {
-                'success': True,
-                'message': '결과 제출 완료'
-            }
+            # 배포 서비스를 통해 결과 저장
+            success = await DeploymentService.submit_result(
+                agent_id=agent_id,
+                task_id=task_id,
+                status=status,
+                exit_code=exit_code,
+                log_summary=log_summary
+            )
+            
+            if success:
+                print(f"[TCP] 작업 결과 저장 완료: agent_id={agent_id}, task_id={task_id}, status={status}")
+                return {
+                    'success': True,
+                    'message': '결과 제출 완료'
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': '결과 저장 실패'
+                }
         except Exception as e:
             print(f"[TCP] 작업 결과 처리 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': str(e)
@@ -276,15 +357,27 @@ class TCPRegistrationServer:
                     'error': 'agent_id와 notification_id는 필수입니다'
                 }
             
-            # TODO: DB에 ACK 저장 (notification_receipts 테이블)
-            print(f"[TCP] 공지 ACK 수신: agent_id={agent_id}, notification_id={notification_id}")
+            # 공지 서비스를 통해 수신 기록 저장
+            success = await AnnouncementService.record_receipt(
+                announcement_id=notification_id,
+                agent_id=agent_id
+            )
             
-            return {
-                'success': True,
-                'message': 'ACK 수신 완료'
-            }
+            if success:
+                print(f"[TCP] 공지 ACK 저장 완료: agent_id={agent_id}, notification_id={notification_id}")
+                return {
+                    'success': True,
+                    'message': 'ACK 수신 완료'
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': 'ACK 저장 실패'
+                }
         except Exception as e:
             print(f"[TCP] 공지 ACK 처리 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': str(e)

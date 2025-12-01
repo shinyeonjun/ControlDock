@@ -62,33 +62,53 @@ async function apiRequest(endpoint, options = {}) {
 // 날짜 포맷팅
 function formatDate(dateString) {
     if (!dateString) return '-';
-    const date = new Date(dateString);
-    return date.toLocaleString('ko-KR', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-    });
+    try {
+        const date = new Date(dateString);
+        // 유효한 날짜인지 확인
+        if (isNaN(date.getTime())) return '-';
+        return date.toLocaleString('ko-KR', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+    } catch (e) {
+        console.error('날짜 포맷팅 오류:', e, dateString);
+        return '-';
+    }
 }
 
 // 상대 시간 표시 (예: "5분 전")
 function formatRelativeTime(dateString) {
     if (!dateString) return '-';
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffSec = Math.floor(diffMs / 1000);
-    const diffMin = Math.floor(diffSec / 60);
-    const diffHour = Math.floor(diffMin / 60);
-    const diffDay = Math.floor(diffHour / 24);
+    try {
+        const date = new Date(dateString);
+        // 유효한 날짜인지 확인
+        if (isNaN(date.getTime())) return '-';
+        
+        const now = new Date();
+        const diffMs = now - date;
+        
+        // 미래 시간이면 현재 시간 표시
+        if (diffMs < 0) return '방금 전';
+        
+        const diffSec = Math.floor(diffMs / 1000);
+        const diffMin = Math.floor(diffSec / 60);
+        const diffHour = Math.floor(diffMin / 60);
+        const diffDay = Math.floor(diffHour / 24);
 
-    if (diffSec < 60) return '방금 전';
-    if (diffMin < 60) return `${diffMin}분 전`;
-    if (diffHour < 24) return `${diffHour}시간 전`;
-    if (diffDay < 7) return `${diffDay}일 전`;
-    return formatDate(dateString);
+        if (diffSec < 60) return '방금 전';
+        if (diffMin < 60) return `${diffMin}분 전`;
+        if (diffHour < 24) return `${diffHour}시간 전`;
+        if (diffDay < 7) return `${diffDay}일 전`;
+        return formatDate(dateString);
+    } catch (e) {
+        console.error('상대 시간 포맷팅 오류:', e, dateString);
+        return '-';
+    }
 }
 
 // 모달 제어

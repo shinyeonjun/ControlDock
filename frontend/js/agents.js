@@ -101,21 +101,12 @@ async function rejectRegistration(requestId) {
 // 에이전트 목록 로드
 async function loadAgents() {
     try {
-        // 등록 완료된 요청들을 에이전트로 표시
-        const completedRequests = registrationRequestsData.filter(r => r.status === 'completed');
+        console.log('에이전트 목록 로드 시작...');
+        const agents = await apiRequest('/agents');
+        console.log('에이전트 목록 응답:', agents);
         
-        // 임시로 등록 완료된 요청을 에이전트로 변환
-        agentsData = completedRequests.map(request => ({
-            id: request.agent_id,
-            host_id: request.agent_id,
-            host_name: request.hostname,
-            hostname: request.hostname,
-            os: request.os,
-            agent_version: request.agent_version,
-            status: 'online',
-            created_at: request.completed_at || request.created_at,
-            last_check_in: new Date().toISOString()
-        }));
+        agentsData = agents || [];
+        console.log(`에이전트 데이터: 총 ${agentsData.length}개`);
         
         updateAgentsTable(agentsData);
         updateFilterStats(agentsData);

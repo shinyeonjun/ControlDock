@@ -69,3 +69,13 @@ app/build/
 app/dist/
 app/*.spec
 
+# Batch files
+*.bat
+
+# Markdown files
+*.md
+
+# Config files
+config.json
+**/config.json
+

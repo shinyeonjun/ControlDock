@@ -72,13 +72,28 @@ class APIClient:
         # 현재는 승인 시 자동으로 완료 처리되므로 여기서는 상태 확인만
         # 실제로는 서버에서 승인 시 자동으로 agent_id와 agent_token을 생성하므로
         # 여기서는 상태 확인 후 agent_id와 agent_token을 받아오는 방식
+        
+        # 등록 요청 조회로 상태 확인
         response = self._request('GET', f'/registration-requests/{request_id}')
         if response and response.get('status') == 'completed':
-            # 등록 완료된 경우 agent_id와 agent_token 반환
+            # 등록 완료된 경우 agent_id 반환
+            agent_id = response.get('agent_id')
+            if not agent_id:
+                # agent_id가 없으면 오류
+                print(f"[오류] 등록 완료 응답에 agent_id가 없습니다: {response}")
+                return None
+            
+            # agent_token은 등록 완료 시에만 서버에서 전달받음
+            # 승인 API 응답에서 받은 토큰을 사용해야 하지만,
+            # 현재 구조에서는 등록 요청 조회 API에서 토큰을 받을 수 없음
+            # 따라서 등록 완료 시 서버에서 토큰을 가져오는 별도 API 호출 필요
+            # 하지만 보안상 토큰은 등록 완료 시에만 한 번 전달되므로,
+            # 여기서는 agent_id만 반환하고, 토큰은 별도로 가져와야 함
+            # TODO: 등록 완료 시 토큰을 가져오는 별도 API 구현 필요
             return {
                 'success': True,
-                'agent_id': response.get('agent_id'),
-                'agent_token': response.get('agent_token')  # 서버에서 생성한 토큰 사용
+                'agent_id': agent_id,
+                'agent_token': None  # 토큰은 별도로 가져와야 함 (현재 구조에서는 불가능)
             }
         return None
     

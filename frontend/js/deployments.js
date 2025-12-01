@@ -30,9 +30,11 @@ function updateDeploymentsTable(deployments) {
             ? Math.round((deployment.completed_count / deployment.total_count) * 100) 
             : 0;
 
+        const deploymentId = deployment.deployment_id || deployment.task_id || '-';
+        
         return `
         <tr>
-            <td><code>${deployment.task_id || '-'}</code></td>
+            <td><code>${deploymentId.substring(0, 8)}...</code></td>
             <td>${deployment.name || '-'}</td>
             <td>${deployment.type || '-'}</td>
             <td>${deployment.total_count || 0}</td>
@@ -57,11 +59,11 @@ function updateDeploymentsTable(deployments) {
             <td>${formatDate(deployment.created_at)}</td>
             <td>
                 <div class="action-buttons">
-                    <button class="action-btn primary" onclick="viewDeploymentDetails('${deployment.task_id}')">상세</button>
+                    <button class="action-btn primary" onclick="viewDeploymentDetails('${deploymentId}')">상세</button>
                     ${deployment.status === 'running' ? 
-                        `<button class="action-btn" onclick="pauseDeployment('${deployment.task_id}')">일시중지</button>` : 
+                        `<button class="action-btn" onclick="pauseDeployment('${deploymentId}')">일시중지</button>` : 
                         deployment.status === 'paused' ? 
-                        `<button class="action-btn" onclick="resumeDeployment('${deployment.task_id}')">재개</button>` : 
+                        `<button class="action-btn" onclick="resumeDeployment('${deploymentId}')">재개</button>` : 
                         ''}
                 </div>
             </td>
@@ -101,24 +103,103 @@ async function createDeployment(formData) {
 }
 
 // 배포 상세 보기
-async function viewDeploymentDetails(taskId) {
+async function viewDeploymentDetails(deploymentId) {
     try {
-        const deployment = await apiRequest(`/deployments/${taskId}`);
-        const results = await apiRequest(`/deployments/${taskId}/results`);
+        if (!deploymentId || deploymentId === 'undefined' || deploymentId === '-') {
+            showError('배포 ID가 유효하지 않습니다.');
+            return;
+        }
+        
+        const deployment = await apiRequest(`/deployments/${deploymentId}`);
+        const results = await apiRequest(`/deployments/${deploymentId}/results`);
         
         // 상세 정보 표시
-        document.getElementById('detail-task-id').textContent = deployment.task_id || '-';
+        const displayDeploymentId = deployment.deployment_id || deployment.task_id || deploymentId || '-';
+        document.getElementById('detail-task-id').textContent = displayDeploymentId;
+        
+        // 배포 이름 표시 (있는 경우)
+        const detailNameEl = document.getElementById('detail-name');
+        if (detailNameEl) {
+            detailNameEl.textContent = deployment.name || '-';
+        }
+        
+        // 상태 표시
+        const statusBadge = deployment.status === 'completed' ? 'completed' : 
+                           deployment.status === 'running' ? 'running' : 
+                           deployment.status === 'paused' ? 'paused' : 
+                           deployment.status === 'failed' ? 'failed' : 'pending';
         document.getElementById('detail-status').innerHTML = `
-            <span class="status-badge ${deployment.status === 'completed' ? 'completed' : deployment.status === 'running' ? 'running' : 'paused'}">
-                ${deployment.status === 'completed' ? '완료' : deployment.status === 'running' ? '실행 중' : '일시중지'}
+            <span class="status-badge ${statusBadge}">
+                ${deployment.status === 'completed' ? '완료' : 
+                  deployment.status === 'running' ? '실행 중' : 
+                  deployment.status === 'paused' ? '일시중지' : 
+                  deployment.status === 'failed' ? '실패' : '대기'}
             </span>
         `;
         
-        const progress = deployment.total_count > 0 
-            ? Math.round((deployment.completed_count / deployment.total_count) * 100) 
+        // 진행률 계산 및 표시
+        const totalCount = deployment.total_count || 0;
+        const completedCount = deployment.completed_count || 0;
+        const progress = totalCount > 0 
+            ? Math.round((completedCount / totalCount) * 100) 
             : 0;
-        document.getElementById('detail-progress').textContent = `${progress}% (${deployment.completed_count || 0}/${deployment.total_count || 0})`;
-        document.getElementById('detail-success-fail').textContent = `성공: ${deployment.success_count || 0}, 실패: ${deployment.failed_count || 0}`;
+        
+        // 진행률 텍스트
+        const progressText = `${progress}% (${completedCount}/${totalCount})`;
+        const progressEl = document.getElementById('detail-progress');
+        if (progressEl) {
+            progressEl.innerHTML = `
+                <div class="progress-bar" style="margin-bottom: 5px;">
+                    <div class="progress-fill" style="width: ${progress}%; background-color: ${progress === 100 ? '#4CAF50' : '#2196F3'};"></div>
+                </div>
+                <div class="progress-text">${progressText}</div>
+            `;
+        }
+        
+        // 성공/실패 표시
+        const successCount = deployment.success_count || 0;
+        const failedCount = deployment.failed_count || 0;
+        const successFailEl = document.getElementById('detail-success-fail');
+        if (successFailEl) {
+            successFailEl.innerHTML = `
+                <span class="success-count" style="color: #4CAF50; font-weight: bold;">성공: ${successCount}</span> / 
+                <span class="failed-count" style="color: #F44336; font-weight: bold;">실패: ${failedCount}</span>
+            `;
+        }
+        
+        // 명령어 표시 (있는 경우)
+        const detailCommandEl = document.getElementById('detail-command');
+        const detailCommandContainer = document.getElementById('detail-command-container');
+        if (detailCommandEl && deployment.command) {
+            detailCommandEl.textContent = deployment.command;
+            if (detailCommandContainer) {
+                detailCommandContainer.style.display = 'block';
+            }
+        } else if (detailCommandContainer) {
+            detailCommandContainer.style.display = 'none';
+        }
+
+        // 배포 상태에 따라 버튼 표시/숨김
+        const pauseBtn = document.getElementById('pause-deployment');
+        const resumeBtn = document.getElementById('resume-deployment');
+        
+        if (deployment.status === 'completed' || deployment.status === 'failed') {
+            // 완료된 배포는 버튼 숨김
+            if (pauseBtn) pauseBtn.style.display = 'none';
+            if (resumeBtn) resumeBtn.style.display = 'none';
+        } else if (deployment.status === 'running') {
+            // 실행 중인 배포는 일시중지 버튼만 표시
+            if (pauseBtn) pauseBtn.style.display = 'inline-block';
+            if (resumeBtn) resumeBtn.style.display = 'none';
+        } else if (deployment.status === 'paused') {
+            // 일시중지된 배포는 재개 버튼만 표시
+            if (pauseBtn) pauseBtn.style.display = 'none';
+            if (resumeBtn) resumeBtn.style.display = 'inline-block';
+        } else {
+            // 기타 상태는 모두 숨김
+            if (pauseBtn) pauseBtn.style.display = 'none';
+            if (resumeBtn) resumeBtn.style.display = 'none';
+        }
 
         // 결과 테이블 업데이트
         updateResultsTable(results);
@@ -138,27 +219,39 @@ function updateResultsTable(results) {
         return;
     }
 
-    tbody.innerHTML = results.map(result => `
+    tbody.innerHTML = results.map(result => {
+        // request_id 또는 task_id 사용 (둘 다 있을 수 있음)
+        const logId = result.request_id || result.task_id;
+        
+        return `
         <tr>
             <td>${result.hostname || result.host_id || '-'}</td>
             <td>
-                <span class="status-badge ${result.status === 'success' ? 'success' : 'failed'}">
-                    ${result.status === 'success' ? '성공' : '실패'}
+                <span class="status-badge ${result.status === 'success' || result.status === 'completed' ? 'success' : 'failed'}">
+                    ${result.status === 'success' || result.status === 'completed' ? '성공' : '실패'}
                 </span>
             </td>
-            <td>${result.exit_code !== undefined ? result.exit_code : '-'}</td>
+            <td>${result.exit_code !== undefined && result.exit_code !== null ? result.exit_code : '-'}</td>
             <td>${result.duration ? `${result.duration}초` : '-'}</td>
             <td>${result.log_summary ? result.log_summary.substring(0, 100) + '...' : '-'}</td>
             <td>
-                <button class="action-btn" onclick="viewLog('${result.request_id}')">로그 보기</button>
+                ${logId && logId !== 'undefined' ? 
+                    `<button class="action-btn" onclick="viewLog('${logId}')">로그 보기</button>` : 
+                    '<span>-</span>'}
             </td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 }
 
 // 로그 보기
 async function viewLog(requestId) {
     try {
+        if (!requestId || requestId === 'undefined' || requestId === '-') {
+            showError('유효하지 않은 작업 ID입니다.');
+            return;
+        }
+        
         const log = await apiRequest(`/deployments/results/${requestId}/log`);
         document.getElementById('log-content').textContent = log.content || '로그가 없습니다';
         document.getElementById('log-detail-section').style.display = 'block';
@@ -168,9 +261,13 @@ async function viewLog(requestId) {
 }
 
 // 배포 일시중지
-async function pauseDeployment(taskId) {
+async function pauseDeployment(deploymentId) {
     try {
-        await apiRequest(`/deployments/${taskId}/pause`, {
+        if (!deploymentId || deploymentId === 'undefined' || deploymentId === '-') {
+            showError('배포 ID가 유효하지 않습니다.');
+            return;
+        }
+        await apiRequest(`/deployments/${deploymentId}/pause`, {
             method: 'POST'
         });
         showSuccess('배포가 일시중지되었습니다');
@@ -181,9 +278,13 @@ async function pauseDeployment(taskId) {
 }
 
 // 배포 재개
-async function resumeDeployment(taskId) {
+async function resumeDeployment(deploymentId) {
     try {
-        await apiRequest(`/deployments/${taskId}/resume`, {
+        if (!deploymentId || deploymentId === 'undefined' || deploymentId === '-') {
+            showError('배포 ID가 유효하지 않습니다.');
+            return;
+        }
+        await apiRequest(`/deployments/${deploymentId}/resume`, {
             method: 'POST'
         });
         showSuccess('배포가 재개되었습니다');
@@ -237,6 +338,15 @@ document.addEventListener('DOMContentLoaded', () => {
         closeModal('deployment-modal');
     });
 
+    // 배포 상세 모달 닫기
+    document.getElementById('close-detail-modal').addEventListener('click', () => {
+        closeModal('deployment-detail-modal');
+    });
+
+    document.getElementById('close-detail').addEventListener('click', () => {
+        closeModal('deployment-detail-modal');
+    });
+
     // 배포 생성 제출
     document.getElementById('submit-deployment').addEventListener('click', async () => {
         const formData = {
@@ -254,8 +364,22 @@ document.addEventListener('DOMContentLoaded', () => {
             const selected = Array.from(document.querySelectorAll('input[name="selected-agents"]:checked'))
                 .map(cb => cb.value);
             formData.target_agents = selected;
+            
+            if (!formData.target_agents || formData.target_agents.length === 0) {
+                showError('최소 하나 이상의 에이전트를 선택해주세요.');
+                return;
+            }
+        } else if (formData.target_type === 'all') {
+            // 전체 에이전트 선택 - 서버에서 처리하도록 target_agents는 보내지 않음
+            // 서버에서 모든 에이전트를 가져와서 처리
+            formData.target_agents = [];  // 빈 배열로 보내면 서버에서 전체 에이전트 처리
         } else if (formData.target_type === 'tag') {
             formData.target_tag = document.getElementById('target-tag').value;
+            showError('태그 기반 배포는 아직 지원하지 않습니다. 에이전트를 직접 선택해주세요.');
+            return;
+        } else {
+            showError('대상 선택 방식을 선택해주세요.');
+            return;
         }
 
         // 일정 설정
@@ -267,6 +391,14 @@ document.addEventListener('DOMContentLoaded', () => {
             showError('작업명과 명령을 입력하세요');
             return;
         }
+
+        // admin 필드를 admin_required로 변환 (서버 호환성)
+        if (formData.admin !== undefined) {
+            formData.admin_required = formData.admin;
+            delete formData.admin;
+        }
+
+        console.log('배포 생성 요청 데이터:', formData);
 
         try {
             await createDeployment(formData);

@@ -171,20 +171,28 @@
                             <h4>작업 정보</h4>
                             <div class="detail-grid">
                                 <div class="detail-item">
+                                    <span class="detail-label">작업명:</span>
+                                    <span class="detail-value" id="detail-name">-</span>
+                                </div>
+                                <div class="detail-item">
                                     <span class="detail-label">작업 ID:</span>
-                                    <span class="detail-value" id="detail-task-id">-</span>
+                                    <span class="detail-value"><code id="detail-task-id">-</code></span>
                                 </div>
                                 <div class="detail-item">
                                     <span class="detail-label">상태:</span>
                                     <span class="detail-value" id="detail-status">-</span>
                                 </div>
-                                <div class="detail-item">
+                                <div class="detail-item full-width">
                                     <span class="detail-label">진행률:</span>
                                     <span class="detail-value" id="detail-progress">-</span>
                                 </div>
                                 <div class="detail-item">
                                     <span class="detail-label">성공/실패:</span>
                                     <span class="detail-value" id="detail-success-fail">-</span>
+                                </div>
+                                <div class="detail-item full-width" id="detail-command-container" style="display: none;">
+                                    <span class="detail-label">실행 명령:</span>
+                                    <span class="detail-value"><code id="detail-command" style="display: block; background: #f5f5f5; padding: 10px; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-break: break-all;"></code></span>
                                 </div>
                             </div>
                         </div>

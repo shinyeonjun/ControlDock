@@ -112,8 +112,13 @@ class TCPClient:
                 response_data += chunk
             
             # JSON 디코딩
-            response = json.loads(response_data.decode('utf-8'))
-            print(f"[TCP] 응답 수신 완료: {response}")
+            try:
+                response = json.loads(response_data.decode('utf-8'))
+                print(f"[TCP] 응답 수신 완료: {response}")
+            except json.JSONDecodeError as e:
+                print(f"[TCP] JSON 디코딩 오류: {e}")
+                print(f"[TCP] 응답 데이터 (raw): {response_data}")
+                raise ValueError(f"서버 응답을 파싱할 수 없습니다: {e}")
             
             sock.close()
             return response
@@ -129,5 +134,180 @@ class TCPClient:
             import traceback
             print(f"[TCP] 상세 오류:")
             traceback.print_exc()
+            return None
+    
+    def poll_tasks(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """작업 폴링 (TCP)"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            
+            try:
+                sock.connect((self.host, self.port))
+            except Exception as e:
+                print(f"[TCP] 작업 폴링 연결 실패: {e}")
+                sock.close()
+                return None
+            
+            # 요청 데이터 준비
+            payload = {
+                'type': 'poll',
+                'agent_id': agent_id
+            }
+            
+            # JSON 인코딩
+            json_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            
+            # 프레이밍: [길이(4바이트)][데이터]
+            length = len(json_data).to_bytes(4, 'big')
+            message = length + json_data
+            
+            # 전송
+            sock.sendall(message)
+            
+            # 응답 수신
+            length_bytes = sock.recv(4)
+            if len(length_bytes) < 4:
+                sock.close()
+                return None
+            
+            length = struct.unpack('>I', length_bytes)[0]
+            
+            # 데이터 읽기
+            response_data = b''
+            while len(response_data) < length:
+                chunk = sock.recv(length - len(response_data))
+                if not chunk:
+                    sock.close()
+                    return None
+                response_data += chunk
+            
+            # JSON 디코딩
+            response = json.loads(response_data.decode('utf-8'))
+            
+            sock.close()
+            return response
+            
+        except Exception as e:
+            print(f"[TCP] 작업 폴링 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def submit_result(self, agent_id: str, task_id: str, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """작업 결과 제출 (TCP)"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            
+            try:
+                sock.connect((self.host, self.port))
+            except Exception as e:
+                print(f"[TCP] 결과 제출 연결 실패: {e}")
+                sock.close()
+                return None
+            
+            # 요청 데이터 준비
+            payload = {
+                'type': 'result',
+                'agent_id': agent_id,
+                'task_id': task_id,
+                'result': result
+            }
+            
+            # JSON 인코딩
+            json_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            
+            # 프레이밍: [길이(4바이트)][데이터]
+            length = len(json_data).to_bytes(4, 'big')
+            message = length + json_data
+            
+            # 전송
+            sock.sendall(message)
+            
+            # 응답 수신
+            length_bytes = sock.recv(4)
+            if len(length_bytes) < 4:
+                sock.close()
+                return None
+            
+            length = struct.unpack('>I', length_bytes)[0]
+            
+            # 데이터 읽기
+            response_data = b''
+            while len(response_data) < length:
+                chunk = sock.recv(length - len(response_data))
+                if not chunk:
+                    sock.close()
+                    return None
+                response_data += chunk
+            
+            # JSON 디코딩
+            response = json.loads(response_data.decode('utf-8'))
+            
+            sock.close()
+            return response
+            
+        except Exception as e:
+            print(f"[TCP] 결과 제출 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def send_notification_ack(self, agent_id: str, notification_id: str) -> Optional[Dict[str, Any]]:
+        """공지 수신 ACK 전송"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            
+            try:
+                sock.connect((self.host, self.port))
+            except Exception as e:
+                print(f"[TCP] ACK 전송 연결 실패: {e}")
+                sock.close()
+                return None
+            
+            # 요청 데이터 준비
+            payload = {
+                'type': 'notification_ack',
+                'agent_id': agent_id,
+                'notification_id': notification_id
+            }
+            
+            # JSON 인코딩
+            json_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            
+            # 프레이밍: [길이(4바이트)][데이터]
+            length = len(json_data).to_bytes(4, 'big')
+            message = length + json_data
+            
+            # 전송
+            sock.sendall(message)
+            
+            # 응답 수신
+            length_bytes = sock.recv(4)
+            if len(length_bytes) < 4:
+                sock.close()
+                return None
+            
+            length = struct.unpack('>I', length_bytes)[0]
+            
+            # 데이터 읽기
+            response_data = b''
+            while len(response_data) < length:
+                chunk = sock.recv(length - len(response_data))
+                if not chunk:
+                    sock.close()
+                    return None
+                response_data += chunk
+            
+            # JSON 디코딩
+            response = json.loads(response_data.decode('utf-8'))
+            
+            sock.close()
+            return response
+            
+        except Exception as e:
+            print(f"[TCP] ACK 전송 오류: {e}")
             return None
 

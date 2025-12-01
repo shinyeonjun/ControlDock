@@ -35,8 +35,8 @@ function updateAnnouncementsTable(announcements) {
             <td><code>${announcement.announcement_id || '-'}</code></td>
             <td>${announcement.title || '-'}</td>
             <td>
-                <span class="status-badge ${announcement.type === 'broadcast' ? 'running' : 'success'}">
-                    ${announcement.type === 'broadcast' ? '브로드캐스트' : '멀티캐스트'}
+                <span class="status-badge running">
+                    브로드캐스트
                 </span>
             </td>
             <td>${announcement.target_count || 0}</td>
@@ -48,8 +48,8 @@ function updateAnnouncementsTable(announcements) {
             </td>
             <td>${formatDate(announcement.sent_at)}</td>
             <td>
-                <span class="status-badge ${announcement.status === 'sent' ? 'success' : 'pending'}">
-                    ${announcement.status === 'sent' ? '발송 완료' : '대기'}
+                <span class="status-badge ${announcement.status === 'sent' ? 'success' : announcement.status === 'expired' ? 'failed' : 'pending'}">
+                    ${announcement.status === 'sent' ? '발송 완료' : announcement.status === 'expired' ? '만료됨' : '대기'}
                 </span>
             </td>
             <td>
@@ -98,8 +98,7 @@ async function viewAnnouncementDetails(announcementId) {
         // 상세 정보 표시
         document.getElementById('detail-announcement-title').textContent = announcement.title || '-';
         document.getElementById('detail-announcement-content').textContent = announcement.content || '-';
-        document.getElementById('detail-announcement-type').textContent = 
-            announcement.type === 'broadcast' ? '브로드캐스트' : '멀티캐스트';
+        document.getElementById('detail-announcement-type').textContent = '브로드캐스트';
         document.getElementById('detail-announcement-targets').textContent = announcement.target_count || 0;
         document.getElementById('detail-announcement-success').textContent = announcement.received_count || 0;
         document.getElementById('detail-announcement-failed').textContent = 
@@ -150,15 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
             save_log: document.getElementById('announcement-log').checked
         };
 
-        if (formData.type === 'multicast') {
-            const groups = document.getElementById('multicast-group').value;
-            if (!groups) {
-                showError('멀티캐스트 그룹을 입력하세요');
-                return;
-            }
-            formData.multicast_groups = groups.split(',').map(g => g.trim());
-        }
-
         if (!formData.title || !formData.content) {
             showError('제목과 내용을 입력하세요');
             return;
@@ -171,15 +161,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // 전송 방식 선택에 따른 UI 변경
-    document.getElementById('announcement-type').addEventListener('change', (e) => {
-        const multicastGroup = document.getElementById('multicast-group-group');
-        if (e.target.value === 'multicast') {
-            multicastGroup.style.display = 'block';
-        } else {
-            multicastGroup.style.display = 'none';
-        }
-    });
 
     // 상세 모달 닫기
     document.getElementById('close-announcement-detail-modal').addEventListener('click', () => {

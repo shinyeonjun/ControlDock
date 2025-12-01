@@ -13,6 +13,17 @@ echo 필요한 패키지 설치 확인 중...
 python -m pip install --upgrade pyinstaller requests urllib3 certifi charset-normalizer idna
 python -m pip install -r requirements.txt
 
+REM 실행 중인 OpsHubAgent.exe 프로세스 종료
+echo.
+echo 실행 중인 OpsHubAgent.exe 프로세스 확인 중...
+tasklist | findstr /I "OpsHubAgent.exe" >nul
+if %ERRORLEVEL% EQU 0 (
+    echo 실행 중인 OpsHubAgent.exe 프로세스를 종료합니다...
+    taskkill /IM OpsHubAgent.exe /F >nul 2>&1
+    timeout /t 2 /nobreak >nul
+    echo 프로세스 종료 완료.
+)
+
 REM 빌드 디렉토리 정리
 echo.
 echo 빌드 디렉토리 정리 중...

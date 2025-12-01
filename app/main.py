@@ -11,6 +11,56 @@ from config.config import Config
 from core.agent import Agent
 import platform
 
+def check_single_instance():
+    """단일 인스턴스 체크 (Windows 전용)"""
+    if platform.system() != 'Windows':
+        return True  # Windows가 아니면 체크하지 않음
+    
+    try:
+        import win32event
+        import win32api
+        import winerror
+        
+        # Mutex 이름 (고유해야 함)
+        mutex_name = "Global\\OpsHubAgent_SingleInstance"
+        
+        # Mutex 생성 시도
+        mutex = win32event.CreateMutex(None, False, mutex_name)
+        last_error = win32api.GetLastError()
+        
+        # 이미 실행 중인 인스턴스가 있는지 확인
+        if last_error == winerror.ERROR_ALREADY_EXISTS:
+            print("OpsHub Agent가 이미 실행 중입니다.")
+            print("다른 인스턴스를 종료하거나 기존 인스턴스를 사용하세요.")
+            
+            # 사용자에게 알림 (선택사항)
+            try:
+                from PyQt6.QtWidgets import QApplication, QMessageBox
+                app = QApplication.instance()
+                if app is None:
+                    app = QApplication(sys.argv)
+                
+                msg = QMessageBox()
+                msg.setWindowTitle('이미 실행 중')
+                msg.setText('OpsHub Agent가 이미 실행 중입니다.')
+                msg.setInformativeText('다른 인스턴스를 종료하거나 기존 인스턴스를 사용하세요.')
+                msg.setIcon(QMessageBox.Icon.Warning)
+                msg.exec()
+            except:
+                pass  # GUI가 없어도 콘솔 메시지만 표시
+            
+            return False
+        
+        return True  # 정상적으로 Mutex 생성됨
+        
+    except ImportError:
+        # win32api가 없으면 체크하지 않음 (개발 환경)
+        print("[경고] win32api를 사용할 수 없어 단일 인스턴스 체크를 건너뜁니다.")
+        return True
+    except Exception as e:
+        print(f"[경고] 단일 인스턴스 체크 실패: {e}")
+        return True  # 오류가 나도 실행은 계속
+
 def run_as_service():
     """서비스로 실행 (Windows 전용)"""
     if platform.system() != 'Windows':
@@ -36,6 +86,10 @@ def run_as_service():
 
 def run_as_console():
     """콘솔 모드로 실행 (디버깅용)"""
+    # 단일 인스턴스 체크
+    if not check_single_instance():
+        sys.exit(1)
+    
     print("OpsHub Agent 시작 (콘솔 모드)")
     print("=" * 50)
     
@@ -55,60 +109,135 @@ def run_as_console():
             
             def on_approve():
                 """등록 승인 처리 - 등록 요청 전송"""
-                print("등록 요청 전송 중...")
+                print("=" * 50)
+                print("등록 요청 전송 시작")
+                print("=" * 50)
                 print(f"[DEBUG] 서버 설정 확인:")
                 print(f"  - server_host: {config.server_host}")
                 print(f"  - server_tcp_port: {config.server_tcp_port}")
                 print(f"  - server_url: {config.server_url}")
+                print(f"[DEBUG] 시스템 정보:")
+                print(f"  - hostname: {system_info['hostname']}")
+                print(f"  - os: {system_info['os']}")
+                print(f"  - version: {config.get('version', '1.0.0')}")
                 
                 # TCP 클라이언트로 등록 요청 전송
                 try:
+                    print(f"[DEBUG] TCP 클라이언트 생성 중...")
                     tcp_client = TCPClient(host=config.server_host, port=config.server_tcp_port)
                     print(f"[DEBUG] TCP 클라이언트 생성 완료: {tcp_client.host}:{tcp_client.port}")
                     
+                    print(f"[DEBUG] 등록 요청 전송 시작...")
                     response = tcp_client.send_registration_request(
                         system_info['hostname'],
                         system_info['os'],
                         config.get('version', '1.0.0')
                     )
                     
-                    if response and response.get('success'):
-                        request_id = response.get('request_id')
-                        print(f"등록 요청 전송 완료: request_id={request_id}")
-                        print("대시보드에서 승인을 기다려주세요.")
+                    print(f"[DEBUG] 응답 수신 완료: {response}")
+                    
+                    if response is None:
+                        error_msg = "서버로부터 응답을 받지 못했습니다"
+                        print(f"[ERROR] {error_msg}")
                         
-                        # request_id를 config에 저장 (Agent가 상태 확인할 때 사용)
-                        config.set('registration_request_id', request_id)
+                        from PyQt6.QtWidgets import QApplication, QMessageBox
+                        app = QApplication.instance()
+                        if app is None:
+                            app = QApplication(sys.argv)
+                        
+                        msg = QMessageBox()
+                        msg.setWindowTitle('등록 요청 실패')
+                        msg.setText(f'등록 요청 전송에 실패했습니다.\n\n오류: {error_msg}')
+                        msg.setInformativeText(f'서버가 실행 중인지 확인하고, 방화벽 설정을 확인해주세요.\n서버: {config.server_host}:{config.server_tcp_port}')
+                        msg.setIcon(QMessageBox.Icon.Critical)
+                        msg.exec()
+                        return
+                    
+                    if response.get('success'):
+                        request_id = response.get('request_id')
+                        status = response.get('status', 'pending')
+                        agent_id = response.get('agent_id')  # 등록 요청 시 생성된 임시 agent_id
+                        
+                        print(f"[SUCCESS] 등록 요청 전송 완료!")
+                        print(f"  - request_id: {request_id}")
+                        print(f"  - status: {status}")
+                        if agent_id:
+                            print(f"  - agent_id: {agent_id} (임시)")
+                        
+                        # request_id와 agent_id를 config에 저장 (Agent가 상태 확인할 때 사용)
+                        if request_id:
+                            config.set('registration_request_id', request_id)
+                        if agent_id:
+                            # 임시 agent_id 저장 (등록 완료 시 확인용)
+                            config.set('pending_agent_id', agent_id)
                         
                         # 등록 요청 완료 알림 다이얼로그 표시
                         from PyQt6.QtWidgets import QApplication, QMessageBox
+                        app = QApplication.instance()
+                        if app is None:
+                            app = QApplication(sys.argv)
+                        
                         msg = QMessageBox()
                         msg.setWindowTitle('등록 요청 전송 완료')
-                        msg.setText(f'등록 요청이 전송되었습니다.\n\n요청 ID: {request_id}\n호스트명: {system_info["hostname"]}')
-                        msg.setInformativeText('대시보드에서 관리자가 승인하면 등록이 완료됩니다.')
+                        
+                        if status == 'already_registered':
+                            # 이미 등록된 PC인 경우 서버에서 반환한 agent_id와 agent_token을 저장
+                            agent_id = response.get('agent_id')
+                            agent_token = response.get('agent_token')
+                            
+                            # 여러 설정을 한 번에 저장 (중복 저장 방지)
+                            updates = {}
+                            if agent_id:
+                                print(f"[정보] 이미 등록된 PC입니다. agent_id를 저장합니다: {agent_id}")
+                                updates['agent_id'] = agent_id
+                                updates['pending_agent_id'] = None
+                                updates['registration_request_id'] = None
+                            
+                            if agent_token:
+                                print(f"[정보] agent_token을 저장합니다.")
+                                # set_agent_token은 별도로 호출 (내부적으로 저장함)
+                                config.set_agent_token(agent_token)
+                            
+                            if updates:
+                                config.set_multiple(updates)
+                            msg.setText(f'이미 등록된 PC입니다.\n\n호스트명: {system_info["hostname"]}\nAgent ID: {agent_id}')
+                            msg.setInformativeText('이 PC는 이미 등록되어 있습니다. 에이전트가 자동으로 시작됩니다.')
+                        else:
+                            msg.setText(f'등록 요청이 전송되었습니다.\n\n요청 ID: {request_id}\n호스트명: {system_info["hostname"]}')
+                            msg.setInformativeText('대시보드에서 관리자가 승인하면 등록이 완료됩니다.')
+                        
                         msg.setIcon(QMessageBox.Icon.Information)
                         msg.exec()
                     else:
-                        error = response.get('error', '알 수 없는 오류') if response else '서버 연결 실패'
-                        print(f"등록 요청 실패: {error}")
-                        print(f"[DEBUG] 응답 내용: {response}")
+                        error = response.get('error', '알 수 없는 오류')
+                        print(f"[ERROR] 등록 요청 실패: {error}")
+                        print(f"[DEBUG] 전체 응답 내용: {response}")
                         
                         # 오류 메시지 표시
                         from PyQt6.QtWidgets import QApplication, QMessageBox
+                        app = QApplication.instance()
+                        if app is None:
+                            app = QApplication(sys.argv)
+                        
                         msg = QMessageBox()
                         msg.setWindowTitle('등록 요청 실패')
                         msg.setText(f'등록 요청 전송에 실패했습니다.\n\n오류: {error}\n\n서버: {config.server_host}:{config.server_tcp_port}')
                         msg.setInformativeText('서버가 실행 중인지 확인하고, 방화벽 설정을 확인해주세요.')
                         msg.setIcon(QMessageBox.Icon.Warning)
                         msg.exec()
+                        
                 except Exception as e:
-                    error_msg = f"TCP 클라이언트 생성 오류: {e}"
+                    error_msg = f"등록 요청 처리 오류: {e}"
                     print(f"[ERROR] {error_msg}")
                     import traceback
                     traceback.print_exc()
                     
                     # 오류 메시지 표시
                     from PyQt6.QtWidgets import QApplication, QMessageBox
+                    app = QApplication.instance()
+                    if app is None:
+                        app = QApplication(sys.argv)
+                    
                     msg = QMessageBox()
                     msg.setWindowTitle('등록 요청 실패')
                     msg.setText(f'등록 요청 전송에 실패했습니다.\n\n오류: {error_msg}')

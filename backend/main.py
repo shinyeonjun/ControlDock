@@ -43,7 +43,8 @@ async def main():
     
     if root_config_file.exists():
         try:
-            with open(root_config_file, 'r', encoding='utf-8') as f:
+            # UTF-8 BOM 처리 (utf-8-sig 사용)
+            with open(root_config_file, 'r', encoding='utf-8-sig') as f:
                 root_config = json.load(f)
                 if 'server' in root_config:
                     server = root_config['server']
@@ -73,8 +74,9 @@ async def main():
         notification_port=udp_notification_port
     )
     
-    # HTTP 서버에 TCP 서버 참조 설정
+    # HTTP 서버에 TCP 서버 및 UDP 서버 참조 설정
     http_server.set_tcp_server(tcp_server)
+    http_server.set_udp_server(udp_server)
     
     # 모든 서버 시작
     print("\n" + "=" * 50)

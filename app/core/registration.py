@@ -50,15 +50,28 @@ class RegistrationManager:
             'approved': 승인됨
             'rejected': 거부됨
             'completed': 등록 완료
-            None: 오류
+            None: 오류 (네트워크 오류 등, 계속 재시도해야 함)
         """
         if not self.request_id:
+            print("[등록 상태] request_id가 없습니다")
             return None
         
-        response = self.client.check_registration_status(self.request_id)
-        if response and response.get('success'):
-            return response.get('status')  # 'pending', 'approved', 'rejected', 'completed'
-        return None
+        try:
+            response = self.client.check_registration_status(self.request_id)
+            if response and response.get('success'):
+                status = response.get('status')
+                print(f"[등록 상태] 상태 확인: request_id={self.request_id}, status={status}")
+                return status  # 'pending', 'approved', 'rejected', 'completed'
+            else:
+                # 응답이 없거나 success가 False인 경우
+                # 네트워크 오류일 수 있으므로 None 반환 (재시도)
+                print(f"[등록 상태] 상태 확인 실패: request_id={self.request_id}, response={response}")
+                return None
+        except Exception as e:
+            print(f"[등록 상태] 상태 확인 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return None  # 오류 발생 시 None 반환 (재시도)
     
     def complete_registration(self) -> Optional[Dict[str, Any]]:
         """등록 완료 (상세 정보 전송)"""
@@ -74,10 +87,37 @@ class RegistrationManager:
             agent_token = response.get('agent_token')
             
             if agent_id:
+                # 등록 요청 시 받은 임시 agent_id와 비교
+                pending_agent_id = self.config.get('pending_agent_id')
+                if pending_agent_id and pending_agent_id != agent_id:
+                    print(f"[경고] 등록 요청 시 받은 agent_id({pending_agent_id})와 등록 완료 시 받은 agent_id({agent_id})가 다릅니다.")
+                    print(f"      서버에서 반환한 agent_id({agent_id})를 사용합니다.")
+                
                 self.config.agent_id = agent_id
+                # 임시 agent_id 제거
+                if pending_agent_id:
+                    self.config.set('pending_agent_id', None)
+            else:
+                print("[오류] 등록 완료 응답에 agent_id가 없습니다.")
+                return None
+            
             if agent_token:
                 # 토큰은 메모리에만 캐싱 (로컬 파일 저장 안 함)
                 self.config.set_agent_token(agent_token)
+                print(f"[등록 완료] agent_token 저장 완료")
+            else:
+                print("[경고] 등록 완료 응답에 agent_token이 없습니다.")
+                print("[등록 완료] 등록 요청 조회 API에서 토큰을 가져오는 중...")
+                # 등록 요청 조회 API에서 토큰 가져오기 시도
+                status_response = self.client.check_registration_status(self.request_id)
+                if status_response and status_response.get('request', {}).get('agent_token'):
+                    agent_token = status_response['request']['agent_token']
+                    self.config.set_agent_token(agent_token)
+                    print(f"[등록 완료] agent_token을 등록 요청 조회에서 가져왔습니다.")
+                else:
+                    print("[오류] 등록 완료 응답과 등록 요청 조회 모두에서 agent_token을 가져올 수 없습니다.")
+                    print("[오류] 서버에서 토큰을 생성하지 않았거나, 이미 만료되었을 수 있습니다.")
+                    return None
             
             print(f"등록 완료: agent_id={agent_id}")
             

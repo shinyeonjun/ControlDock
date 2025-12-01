@@ -8,7 +8,6 @@ from database.registration_db import (
     get_registration_requests,
     approve_registration,
     complete_registration,
-    update_heartbeat,
     get_registration_by_agent_id
 )
 from database.pc_db import (
@@ -27,7 +26,6 @@ __all__ = [
     'get_registration_requests',
     'approve_registration',
     'complete_registration',
-    'update_heartbeat',
     'get_registration_by_agent_id',
     'create_pc',
     'get_pc',

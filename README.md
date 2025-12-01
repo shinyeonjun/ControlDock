@@ -136,20 +136,22 @@ SUPABASE_KEY=your-anon-key
 
 #### 프론트엔드 설정
 
-`config.json` 파일 수정:
+프로젝트 루트에 `config.json` 파일 생성:
 
 ```json
 {
   "server": {
-    "host": "172.29.44.72",
+    "host": "YOUR_SERVER_IP",
     "http_port": 8000,
     "tcp_port": 5500
   },
   "frontend": {
-    "api_base_url": "http://172.29.44.72:8000/api"
+    "api_base_url": "http://YOUR_SERVER_IP:8000/api"
   }
 }
 ```
+
+**참고**: `YOUR_SERVER_IP`를 실제 서버 IP 주소로 변경하세요.
 
 ### 3. 백엔드 서버 실행
 
@@ -178,9 +180,9 @@ python main.py
 ```
 
 서버가 다음 포트에서 실행됩니다:
-- HTTP: `http://0.0.0.0:8000`
-- TCP: `0.0.0.0:5500`
-- UDP: `0.0.0.0:5501`, `5502`
+- HTTP: `http://서버주소:8000`
+- TCP: `서버주소:5500`
+- UDP: `서버주소:5501`, `5502`
 
 ### 4. 에이전트 빌드 및 배포
 
@@ -221,23 +223,25 @@ build.bat
 {
   "agent_id": "your-agent-id",
   "server": {
-    "host": "172.29.44.72",
+    "host": "YOUR_SERVER_IP",
     "http_port": 8000,
     "tcp_port": 5500
   },
   "agent": {
-    "poll_interval": 10,
+    "poll_interval": 30,
     "request_status_interval": 30,
     "auto_start": true
   }
 }
 ```
 
+**참고**: `YOUR_SERVER_IP`를 실제 서버 IP 주소로 변경하세요.
+
 ## 📖 사용 방법
 
 ### 웹 대시보드 접속
 
-브라우저에서 `http://172.29.44.72:8000` 접속
+브라우저에서 `http://YOUR_SERVER_IP:8000` 접속 (YOUR_SERVER_IP를 실제 서버 IP로 변경)
 
 ### PC 등록 프로세스
 
@@ -274,9 +278,12 @@ python app/main.py --remove
 ```json
 {
   "server": {
-    "host": "0.0.0.0",      # 서버 바인딩 주소
-    "http_port": 8000,      # HTTP 서버 포트
-    "tcp_port": 5500        # TCP 서버 포트
+    "host": "서버_IP_주소",
+    "http_port": 8000,
+    "tcp_port": 5500
+  },
+  "frontend": {
+    "api_base_url": "http://서버_IP_주소:8000/api"
   }
 }
 ```
@@ -284,13 +291,17 @@ python app/main.py --remove
 환경 변수로도 설정 가능 (`backend/.env`):
 
 ```env
-HTTP_HOST=0.0.0.0
+HTTP_HOST=서버_바인딩_주소
 HTTP_PORT=8000
-TCP_HOST=0.0.0.0
+TCP_HOST=서버_바인딩_주소
 TCP_PORT=5500
 UDP_HEARTBEAT_PORT=5501
 UDP_NOTIFICATION_PORT=5502
 ```
+
+**참고**: 
+- `서버_IP_주소`: 외부 접근 가능한 서버 IP 주소
+- `서버_바인딩_주소`: 서버가 바인딩할 주소 (일반적으로 `0.0.0.0` 또는 특정 IP)
 
 ### 에이전트 설정
 

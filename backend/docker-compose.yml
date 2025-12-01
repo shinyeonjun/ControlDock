@@ -1,34 +1,36 @@
 version: '3.8'
 
 services:
-  backend:
+  ophub-server:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: opshub-backend
+    container_name: ophub-server
     restart: unless-stopped
-    ports:
-      - "0.0.0.0:8000:8000"      # HTTP
-      - "0.0.0.0:5500:5500"      # TCP
-      - "0.0.0.0:5501:5501/udp"  # UDP 하트비트
-      - "0.0.0.0:5502:5502/udp"  # UDP 공지
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
-      - HTTP_HOST=0.0.0.0
-      - HTTP_PORT=8000
-      - TCP_HOST=0.0.0.0
-      - TCP_PORT=5500
-      - UDP_HEARTBEAT_PORT=5501
-      - UDP_NOTIFICATION_PORT=5502
-    env_file:
-      - .env
+    ports:
+      # HTTP 서버 (웹 대시보드)
+      - "8000:8000/tcp"
+      # TCP 서버 (에이전트 등록)
+      - "5500:5500/tcp"
+      # UDP 서버 (하트비트) - UDP 명시적으로 지정
+      - "5501:5501/udp"
+      # UDP 서버 (공지 브로드캐스트) - UDP 명시적으로 지정
+      - "5502:5502/udp"
     volumes:
+      # config.json 마운트 (선택사항)
+      - ../config.json:/app/config.json:ro
       # frontend 디렉토리 마운트
       - ../frontend:/app/frontend:ro
-      # config.json 마운트 (선택사항)
-      - ../config.json:/app/../config.json:ro
-    network_mode: bridge
-    # Windows에서는 host 네트워크 모드를 사용할 수 없으므로 bridge 모드 사용
-    # 포트 포워딩으로 외부 접속 가능
+    networks:
+      - ophub-network
+    # 환경 변수 파일
+    env_file:
+      - .env
+
+networks:
+  ophub-network:
+    driver: bridge
 

@@ -26,14 +26,14 @@ class Config:
         # 루트 config.json 경로 찾기 (프로젝트 루트)
         self.root_config_file = self._find_root_config()
         
-        # 기본 설정값
-        # 주의: 실제 서버 IP로 변경하거나 config.json 파일에서 설정하세요
+        # 기본 설정값 (config.json 파일이 없을 때만 사용)
+        # 실제 서버 설정은 config.json 파일에서 읽어옵니다
         self.default_config = {
-            'server_url': 'http://172.29.44.72:8000',
-            'server_host': '172.29.44.72',  # TCP 서버 호스트
+            'server_url': None,  # config.json에서 읽어옴
+            'server_host': None,  # config.json에서 읽어옴
             'server_tcp_port': 5500,  # TCP 서버 포트
             'agent_id': None,  # agent_token은 서버에서 가져옴
-            'poll_interval': 10,  # 초
+            'poll_interval': 30,  # 하트비트 전송 주기 (초) - 30초마다 전송하여 항상 온라인 유지
             'request_status_interval': 30,  # 승인 요청 상태 확인 주기 (초)
             'auto_start': True,
             'version': '1.0.0'
@@ -182,10 +182,34 @@ class Config:
         """설정값 가져오기"""
         return self._config.get(key, default)
     
-    def set(self, key: str, value):
-        """설정값 설정 및 저장"""
+    def set(self, key: str, value, save_immediately: bool = True):
+        """설정값 설정 및 저장
+        
+        Args:
+            key: 설정 키
+            value: 설정 값
+            save_immediately: 즉시 저장 여부 (기본값: True)
+        """
+        old_value = self._config.get(key)
+        if old_value == value:
+            # 값이 변경되지 않았으면 저장하지 않음
+            return
+        
         self._config[key] = value
-        self._save_config_to_file(self._config)
+        if save_immediately:
+            self._save_config_to_file(self._config)
+    
+    def set_multiple(self, updates: dict):
+        """여러 설정값을 한 번에 설정 및 저장"""
+        changed = False
+        for key, value in updates.items():
+            old_value = self._config.get(key)
+            if old_value != value:
+                self._config[key] = value
+                changed = True
+        
+        if changed:
+            self._save_config_to_file(self._config)
         
     @property
     def agent_id(self) -> Optional[str]:
@@ -193,7 +217,7 @@ class Config:
     
     @agent_id.setter
     def agent_id(self, value: str):
-        self.set('agent_id', value)
+        self.set('agent_id', value, save_immediately=True)
         
     def get_agent_token(self) -> Optional[str]:
         """에이전트 토큰 가져오기 (서버에서 가져옴, 캐싱됨)"""
@@ -207,7 +231,13 @@ class Config:
         
     @property
     def server_url(self) -> str:
-        return self.get('server_url', 'http://172.29.44.72:8000')
+        url = self.get('server_url')
+        if not url:
+            raise ValueError(
+                "server_url이 설정되지 않았습니다. "
+                "config.json 파일에 server.host와 server.http_port를 설정하세요."
+            )
+        return url
     
     @property
     def poll_interval(self) -> int:
@@ -219,8 +249,14 @@ class Config:
     
     @property
     def server_host(self) -> str:
-        return self.get('server_host', '172.29.44.72')
+        host = self.get('server_host')
+        if not host:
+            raise ValueError(
+                "server_host가 설정되지 않았습니다. "
+                "config.json 파일에 server.host를 설정하세요."
+            )
+        return host
     
     @property
     def server_tcp_port(self) -> int:
-        return self.get('server_tcp_port', 5500)
+        return self.get('server_tcp_port', self.default_config.get('server_tcp_port', 5500))

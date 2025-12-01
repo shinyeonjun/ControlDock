@@ -9,7 +9,10 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from config.config import Config
 from client.api_client import APIClient
+from client.udp_client import UDPClient
+from client.tcp_client import TCPClient
 from core.registration import RegistrationManager
+from core.announcement_handler import AnnouncementHandler
 from utils.system_info import SystemInfo
 
 class Agent:
@@ -23,6 +26,11 @@ class Agent:
         self.running = False
         self.thread = None
         self.status = 'unknown'  # 'online', 'offline', 'pending', 'unknown'
+        
+        # UDP 클라이언트 및 공지 핸들러 초기화
+        self.udp_client: Optional[UDPClient] = None
+        self.announcement_handler: Optional[AnnouncementHandler] = None
+        self.tcp_client: Optional[TCPClient] = None
         
         # 트레이 아이콘에 상태 콜백 등록
         if self.tray_icon:
@@ -47,27 +55,32 @@ class Agent:
         """에이전트 중지"""
         print("에이전트 중지...")
         self.running = False
+        
+        # UDP 클라이언트 중지
+        if self.udp_client:
+            self.udp_client.stop()
+        
         if self.thread:
             self.thread.join(timeout=5)
     
     def _run(self):
         """메인 실행 루프"""
+        # 등록 요청이 있으면 먼저 처리 (등록 상태와 관계없이)
+        if self.registration.request_id:
+            print(f"등록 요청 대기 중... (Request ID: {self.registration.request_id})")
+            self.status = 'pending'
+            self._update_tray_status()
+            self._handle_registration()
+            return
+        
         # 등록 확인
         if not self.registration.is_registered():
-            # 이미 등록 요청이 있는 경우 (TCP로 이미 전송한 경우)
-            if self.registration.request_id:
-                print(f"등록 요청 대기 중... (Request ID: {self.registration.request_id})")
-                self.status = 'pending'
-                self._update_tray_status()
-                self._handle_registration()
-                return
-            else:
-                # 등록 요청이 없는 경우에만 새로 요청
-                print("등록되지 않은 에이전트입니다. 등록 요청을 시작합니다...")
-                self.status = 'pending'
-                self._update_tray_status()
-                self._handle_registration()
-                return
+            # 등록 요청이 없는 경우에만 새로 요청
+            print("등록되지 않은 에이전트입니다. 등록 요청을 시작합니다...")
+            self.status = 'pending'
+            self._update_tray_status()
+            self._handle_registration()
+            return
         
         # 등록된 에이전트: 하트비트 및 작업 폴링
         agent_id = self.config.agent_id
@@ -77,6 +90,9 @@ class Agent:
             self.status = 'offline'
             self._update_tray_status()
             return
+        
+        # UDP 클라이언트 및 공지 핸들러 초기화
+        self._init_udp_and_announcement(agent_id)
         
         # 서버에서 설정 동기화 (DB에서 최신 설정 가져오기)
         self._sync_config_from_server(agent_id)
@@ -92,15 +108,71 @@ class Agent:
         # 메인 루프 실행
         self._run_main_loop(agent_id, agent_token)
     
+    def _init_udp_and_announcement(self, agent_id: str):
+        """UDP 클라이언트 및 공지 핸들러 초기화"""
+        try:
+            print(f"[에이전트] UDP 클라이언트 초기화 시작: agent_id={agent_id}")
+            print(f"[에이전트] 서버 호스트: {self.config.server_host}, TCP 포트: {self.config.server_tcp_port}")
+            
+            # TCP 클라이언트 생성 (ACK 전송용)
+            self.tcp_client = TCPClient(
+                host=self.config.server_host,
+                port=self.config.server_tcp_port
+            )
+            print("[에이전트] TCP 클라이언트 생성 완료")
+            
+            # UDP 클라이언트 생성
+            self.udp_client = UDPClient(
+                server_host=self.config.server_host,
+                heartbeat_port=5501,
+                notification_port=5502
+            )
+            print(f"[에이전트] UDP 클라이언트 생성 완료: 서버={self.config.server_host}:5501")
+            
+            # 공지 핸들러 생성
+            self.announcement_handler = AnnouncementHandler(
+                config=self.config,
+                tcp_client=self.tcp_client
+            )
+            
+            # 공지 수신 콜백 설정
+            self.udp_client.set_notification_callback(
+                self.announcement_handler.handle_notification
+            )
+            
+            # UDP 클라이언트 시작 (공지 수신 시작)
+            self.udp_client.start()
+            
+            print("[에이전트] UDP 클라이언트 및 공지 핸들러 초기화 완료")
+        except Exception as e:
+            print(f"[에이전트] UDP/공지 초기화 오류: {e}")
+            import traceback
+            traceback.print_exc()
+    
     def _run_main_loop(self, agent_id: str, agent_token: str):
         """등록된 에이전트의 메인 실행 루프 (하트비트 및 작업 폴링)"""
         print(f"에이전트 실행 중... (ID: {agent_id})")
         self.status = 'online'
         self._update_tray_status()
         
+        # UDP 클라이언트가 없으면 자동 초기화
+        if not self.udp_client:
+            print(f"[에이전트] UDP 클라이언트가 없어서 자동 초기화합니다.")
+            self._init_udp_and_announcement(agent_id)
+        
         while self.running:
             try:
-                # 하트비트 전송 및 상태 반영
+                # 하트비트 전송 (UDP)
+                if self.udp_client:
+                    heartbeat_udp_success = self.udp_client.send_heartbeat(agent_id)
+                    if not heartbeat_udp_success:
+                        print(f"[에이전트] UDP 하트비트 전송 실패")
+                else:
+                    # UDP 클라이언트가 여전히 없으면 재시도
+                    print(f"[에이전트] UDP 클라이언트가 없어서 재초기화 시도합니다.")
+                    self._init_udp_and_announcement(agent_id)
+                
+                # 하트비트 전송 및 상태 반영 (HTTP - 기존 방식 유지)
                 heartbeat_result = self._send_heartbeat(agent_id, agent_token)
                 # 410 Gone 응답이면 재등록 필요
                 if isinstance(heartbeat_result, dict) and heartbeat_result.get('_needs_reregistration'):
@@ -119,16 +191,23 @@ class Agent:
                 
                 heartbeat_success = bool(heartbeat_result)
                 
-                self.status = 'online' if heartbeat_success else 'offline'
+                # 에이전트가 실행 중이면 항상 온라인으로 표시
+                # (하트비트 전송 실패는 네트워크 문제일 수 있지만, 에이전트 자체는 실행 중)
+                self.status = 'online'
                 self._update_tray_status()
-                # 작업 폴링
-                self._poll_tasks(agent_id, agent_token)
-                # 폴링 간격 대기
+                
+                # 작업 폴링 (TCP)
+                self._poll_tasks_tcp(agent_id)
+                # 폴링 간격 대기 (하트비트 전송 주기)
                 time.sleep(self.config.poll_interval)
                 
             except Exception as e:
                 print(f"에이전트 실행 오류: {e}")
-                self.status = 'offline'
+                import traceback
+                traceback.print_exc()
+                # 에러가 발생해도 에이전트는 실행 중이므로 온라인 상태 유지
+                # (네트워크 오류 등 일시적 문제일 수 있음)
+                self.status = 'online'
                 self._update_tray_status()
                 time.sleep(self.config.poll_interval)
     
@@ -147,19 +226,40 @@ class Agent:
         self._update_tray_status()
         
         # 승인 대기 (폴링)
-        # 폴링 간격을 최소 30초로 설정 (너무 자주 요청하지 않도록)
-        interval = max(self.config.request_status_interval, 30)
+        # 폴링 간격을 최소 10초로 설정 (너무 길지 않게)
+        interval = max(self.config.request_status_interval, 10)
         print(f"등록 승인 대기 중... (확인 간격: {interval}초)")
+        print(f"서버에서 승인되면 자동으로 연결됩니다.")
+        
+        consecutive_errors = 0
+        max_consecutive_errors = 5  # 연속 5번 실패하면 로그 출력
+        check_count = 0
         
         while self.running:
             try:
+                check_count += 1
                 status = self.registration.check_status()
                 
+                # 상태 확인 성공 시 에러 카운터 리셋
+                if status is not None:
+                    consecutive_errors = 0
+                    if check_count % 6 == 0:  # 6번마다 한 번씩 상태 로그 출력 (약 1분마다)
+                        print(f"[등록 상태] 승인 대기 중... (확인 횟수: {check_count}, 상태: {status})")
+                else:
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        print(f"[경고] 등록 상태 확인 실패 ({consecutive_errors}회 연속). 네트워크 문제일 수 있습니다. 계속 재시도합니다...")
+                        consecutive_errors = 0  # 로그 출력 후 리셋
+                    # status가 None이면 pending으로 간주하고 계속 재시도
+                    status = 'pending'
+                
                 if status == 'approved':
-                    print("등록이 승인되었습니다. 등록 완료 중...")
+                    print("=" * 50)
+                    print("✓ 등록이 승인되었습니다! 등록 완료 중...")
+                    print("=" * 50)
                     result = self.registration.complete_registration()
                     if result:
-                        print("등록 완료!")
+                        print("✓ 등록 완료! 서버에 연결합니다...")
                         # 서비스 설치 확인은 메인 스레드에서 실행되도록 콜백 사용
                         # (complete_registration 내부에서 콜백이 호출됨)
                         
@@ -168,39 +268,45 @@ class Agent:
                         if hasattr(self.config, 'set'):
                             self.config.set('registration_request_id', None)
                         
-                        # 등록 완료 후 메인 루프로 직접 진입 (재귀 호출 대신)
-                        # agent_id와 agent_token이 제대로 저장되었는지 확인
+                        # 등록 완료 후 메인 루프로 직접 진입
                         agent_id = self.config.agent_id
                         agent_token = self.config.get_agent_token()
                         
                         if agent_id and agent_token:
+                            print(f"✓ 에이전트 연결 시작: agent_id={agent_id}")
+                            # UDP 클라이언트 및 공지 핸들러 초기화
+                            self._init_udp_and_announcement(agent_id)
                             # 메인 루프 실행
                             self._run_main_loop(agent_id, agent_token)
                             return
                         else:
-                            print("에이전트 ID 또는 토큰이 저장되지 않았습니다. 재시작이 필요합니다.")
+                            print("✗ 에이전트 ID 또는 토큰이 저장되지 않았습니다. 재시작이 필요합니다.")
                             self.status = 'offline'
                             self._update_tray_status()
                             break
                     else:
-                        print("등록 완료 실패")
+                        print("✗ 등록 완료 실패")
                         self.status = 'offline'
                         self._update_tray_status()
                         break
                 
                 elif status == 'rejected':
-                    print("등록 요청이 거부되었습니다.")
+                    print("=" * 50)
+                    print("✗ 등록 요청이 거부되었습니다.")
+                    print("=" * 50)
                     self.status = 'offline'
                     self._update_tray_status()
                     break
                 
                 elif status == 'completed':
-                    print("이미 등록이 완료되었습니다. agent_id와 agent_token을 받아옵니다...")
+                    print("=" * 50)
+                    print("✓ 이미 등록이 완료되었습니다. agent_id와 agent_token을 받아옵니다...")
+                    print("=" * 50)
                     # completed 상태이지만 agent_id와 agent_token이 없을 수 있으므로
                     # complete_registration()을 호출하여 받아옴
                     result = self.registration.complete_registration()
                     if result:
-                        print("등록 정보를 받아왔습니다!")
+                        print("✓ 등록 정보를 받아왔습니다! 서버에 연결합니다...")
                         # request_id 클리어
                         self.registration.request_id = None
                         if hasattr(self.config, 'set'):
@@ -211,16 +317,19 @@ class Agent:
                         agent_token = self.config.get_agent_token()
                         
                         if agent_id and agent_token:
+                            print(f"✓ 에이전트 연결 시작: agent_id={agent_id}")
+                            # UDP 클라이언트 및 공지 핸들러 초기화
+                            self._init_udp_and_announcement(agent_id)
                             # 메인 루프 실행
                             self._run_main_loop(agent_id, agent_token)
                             return
                         else:
-                            print("에이전트 ID 또는 토큰이 저장되지 않았습니다. 재시작이 필요합니다.")
+                            print("✗ 에이전트 ID 또는 토큰이 저장되지 않았습니다. 재시작이 필요합니다.")
                             self.status = 'offline'
                             self._update_tray_status()
                             break
                     else:
-                        print("등록 정보를 받아오는데 실패했습니다.")
+                        print("✗ 등록 정보를 받아오는데 실패했습니다.")
                         self.status = 'offline'
                         self._update_tray_status()
                         break
@@ -306,17 +415,27 @@ class Agent:
         
         return None
     
-    def _poll_tasks(self, agent_id: str, agent_token: str):
-        """작업 폴링"""
-        response = self.client.poll_tasks(agent_id, agent_token, want_n=1)
+    def _poll_tasks_tcp(self, agent_id: str):
+        """작업 폴링 (TCP)"""
+        if not self.tcp_client:
+            return
         
-        if response and 'task' in response:
-            task = response['task']
-            print(f"작업 수신: {task.get('task_id')}")
-            self._execute_task(task)
-        elif response and response.get('no_task'):
-            # 작업 없음
-            pass
+        response = self.tcp_client.poll_tasks(agent_id)
+        
+        if response and response.get('success'):
+            if 'task' in response:
+                task = response['task']
+                print(f"[작업] 작업 수신: task_id={task.get('task_id')}")
+                self._execute_task(task)
+            elif response.get('no_task'):
+                # 작업 없음
+                pass
+        elif response and response.get('re_register'):
+            # 재등록 필요
+            print("[작업] 서버에서 재등록이 필요합니다")
+            self.config.agent_id = None
+            self.config.set('agent_id', None)
+            self._run()
     
     def _execute_task(self, task: Dict[str, Any]):
         """작업 실행"""
@@ -373,17 +492,20 @@ class Agent:
                 'completed_at': completed_at.isoformat() + 'Z'
             }
             
-            # 결과 제출
-            success = self.client.submit_result(
-                self.config.agent_id,
-                self.config.get_agent_token(),
-                result_data
-            )
-            
-            if success:
-                print(f"작업 결과 제출 성공: {task_id}")
+            # 결과 제출 (TCP)
+            if self.tcp_client:
+                response = self.tcp_client.submit_result(
+                    self.config.agent_id,
+                    task_id,
+                    result_data
+                )
+                
+                if response and response.get('success'):
+                    print(f"[작업] 결과 제출 성공: {task_id}")
+                else:
+                    print(f"[작업] 결과 제출 실패: {task_id}")
             else:
-                print(f"작업 결과 제출 실패: {task_id}")
+                print(f"[작업] TCP 클라이언트가 없어 결과를 제출할 수 없습니다: {task_id}")
                 
         except subprocess.TimeoutExpired:
             print(f"작업 타임아웃: {task_id}")
@@ -398,11 +520,12 @@ class Agent:
                 'started_at': started_at.isoformat() + 'Z',
                 'completed_at': completed_at.isoformat() + 'Z'
             }
-            self.client.submit_result(
-                self.config.agent_id,
-                self.config.get_agent_token(),
-                result_data
-            )
+            if self.tcp_client:
+                self.tcp_client.submit_result(
+                    self.config.agent_id,
+                    task_id,
+                    result_data
+                )
         except Exception as e:
             print(f"작업 실행 오류: {e}")
             completed_at = datetime.utcnow()
@@ -416,9 +539,10 @@ class Agent:
                 'started_at': started_at.isoformat() + 'Z',
                 'completed_at': completed_at.isoformat() + 'Z'
             }
-            self.client.submit_result(
-                self.config.agent_id,
-                self.config.get_agent_token(),
-                result_data
-            )
+            if self.tcp_client:
+                self.tcp_client.submit_result(
+                    self.config.agent_id,
+                    task_id,
+                    result_data
+                )
 
