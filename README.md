@@ -9,7 +9,7 @@
 
 ![ControlDock 대시보드](docs/assets/dashboard.png)
 
-## 한눈에 보기
+## What it demonstrates
 
 - 관리자 승인 기반 PC 등록
 - 에이전트 상태 확인과 하트비트 처리
@@ -35,6 +35,8 @@
 
 ## 실행
 
+운영 대상 PC의 인증·네트워크 설정과 Supabase 설정은 별도로 구성해야 합니다. 실제 운영 credential은 저장소에 넣지 않습니다.
+
 ### Server
 
 ```powershell
@@ -56,3 +58,7 @@ docker-compose up --build
 pip install -r app\requirements.txt
 python app\main.py
 ```
+
+## Scope
+
+이 저장소는 중앙 서버·Windows agent·대시보드 간의 운영 흐름을 보여주는 개인 프로젝트입니다. 실제 원격 운영 환경에 적용하기 전에는 인증, 권한, 네트워크 노출 정책을 별도로 검토해야 합니다.
